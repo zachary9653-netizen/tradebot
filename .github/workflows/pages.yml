@@ -46,12 +46,14 @@ jobs:
       - name: Refuse to publish anything account-related
         run: python check_public.py public/index.html
 
+      # Pages must already be enabled on the repository, with its source set
+      # to GitHub Actions. This step cannot turn it on: creating a Pages site
+      # needs admin rights, and GITHUB_TOKEN is refused with "Resource not
+      # accessible by integration" however its permissions are set. If this
+      # step fails with "Get Pages site failed: Not Found", that is what it
+      # means - Settings -> Pages -> Source -> GitHub Actions.
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          # Turn Pages on if it is not already, instead of failing. Saves
-          # having to set it by hand, and survives it being switched off.
-          enablement: true
 
       - name: Upload the page
         uses: actions/upload-pages-artifact@v3
