@@ -48,6 +48,10 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          # Turn Pages on if it is not already, instead of failing. Saves
+          # having to set it by hand, and survives it being switched off.
+          enablement: true
 
       - name: Upload the page
         uses: actions/upload-pages-artifact@v3
