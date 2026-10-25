@@ -13,3 +13,6 @@ venv/
 # state.json and logs/ are deliberately NOT ignored. The cloud run commits
 # them back, which is what lets the bot remember a crossover it has already
 # traded and keep a history you can read.
+
+# Built by dashboard.py --public, published by Actions, not committed.
+public/

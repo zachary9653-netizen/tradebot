@@ -1,0 +1,59 @@
+name: Publish dashboard
+
+# Deliberately separate from the trading workflow. Publishing is cosmetic and
+# trading is not, so a problem here must never turn the morning's trading run
+# red or stop it placing an order.
+on:
+  workflow_run:
+    workflows: ["Trading bot"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # No Alpaca secrets are given to this job on purpose. It cannot reach
+      # the account, so it cannot publish anything about it even by mistake.
+      - name: Build the public dashboard
+        run: python dashboard.py --public --out public/index.html
+
+      - name: Refuse to publish anything account-related
+        run: python check_public.py public/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the page
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4

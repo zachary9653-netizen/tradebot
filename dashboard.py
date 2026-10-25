@@ -21,6 +21,7 @@ import re
 import subprocess
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 
 from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import QueryOrderStatus
@@ -283,7 +284,14 @@ def tile(label: str, value: str, note: str = "", tone: str = "") -> str:
     )
 
 
-def render(data, signal, detail, crossovers, account, runs, next_run) -> str:
+def render(data, signal, detail, crossovers, account, runs, next_run,
+           public: bool = False) -> str:
+    """Build the page. `public` strips everything about the account.
+
+    The public page carries market data and the strategy's own reading of it,
+    both of which anyone could work out from public prices. It carries no
+    balance, no position, no orders, no account number and no run log.
+    """
     svg, points = build_chart(data, crossovers)
 
     # Headline tiles.
@@ -299,7 +307,15 @@ def render(data, signal, detail, crossovers, account, runs, next_run) -> str:
         sig_note = f"fast line sitting {side} the slow one, no crossing"
 
     tiles = [tile("Signal", sig_value, sig_note, sig_tone)]
-    if account["ok"]:
+    if public:
+        # Market facts only. Nothing here is specific to the account.
+        tiles.append(tile("Last close", money(detail["close"]),
+                          f"session of {detail['current_date']}"))
+        tiles.append(tile(f"{config.SHORT_WINDOW}-day average",
+                          money(detail["sma_short"]), "the fast line"))
+        tiles.append(tile(f"{config.LONG_WINDOW}-day average",
+                          money(detail["sma_long"]), "the slow line"))
+    elif account["ok"]:
         pos = account["position"]
         if pos:
             pl = pos["pl"]
@@ -318,7 +334,9 @@ def render(data, signal, detail, crossovers, account, runs, next_run) -> str:
         tiles.append(tile("Account", "Unavailable", "could not reach Alpaca", "warn"))
 
     # Orders.
-    if account["ok"] and account["orders"]:
+    if public:
+        orders_html = ""
+    elif account["ok"] and account["orders"]:
         rows = "".join(
             f"<tr><td>{o['submitted']}</td><td>{o['symbol']}</td>"
             f"<td class=\"{'good' if o['side'] == 'BUY' else 'warn'}\">{o['side']}</td>"
@@ -348,7 +366,9 @@ def render(data, signal, detail, crossovers, account, runs, next_run) -> str:
         cross_html = '<p class="empty">No crossovers in this window.</p>'
 
     # Recent runs.
-    if runs:
+    if public:
+        runs_html = ""
+    elif runs:
         rows = "".join(
             f"<tr><td>{html.escape(r['when'])}</td>"
             f"<td>{html.escape(r['signal'])}</td>"
@@ -369,12 +389,31 @@ def render(data, signal, detail, crossovers, account, runs, next_run) -> str:
     )
 
     market = ""
-    if account["ok"]:
+    if not public and account["ok"]:
         market = ("Market open" if account["market_open"]
                   else f"Market closed &middot; next open {account['next_open']}")
 
+    # The two sections that describe the account, dropped entirely when the
+    # page is going somewhere public.
+    private_sections = "" if public else f"""
+  <h2>Orders on the account</h2>
+  <div class="card">{orders_html}</div>
+
+  <h2>Recent scheduled runs</h2>
+  <div class="card">{runs_html}</div>
+"""
+
+    footer = (
+        "Market data and the strategy's reading of it. Nothing here describes "
+        "any account, balance, holding or order."
+        if public else
+        "Rebuilt every weekday morning by the scheduled run, and whenever you "
+        'run <span class="mono">python dashboard.py</span>. This page only '
+        'reports; trades are placed by <span class="mono">bot.py</span>.'
+    )
+
     banner = ""
-    if not account["ok"]:
+    if not public and not account["ok"]:
         banner = (f'<div class="banner">Could not reach Alpaca, so the balance and '
                   f'orders are missing. The chart and signal below are still live.'
                   f'<br><span class="mono">{html.escape(account["error"] or "")}</span></div>')
@@ -537,17 +576,9 @@ def render(data, signal, detail, crossovers, account, runs, next_run) -> str:
   <h2>Crossovers in this window</h2>
   <div class="card">{cross_html}</div>
 
-  <h2>Orders on the account</h2>
-  <div class="card">{orders_html}</div>
+  {private_sections}
 
-  <h2>Recent scheduled runs</h2>
-  <div class="card">{runs_html}</div>
-
-  <footer>
-    Rebuilt every weekday morning by the scheduled task, and whenever you run
-    <span class="mono">python dashboard.py</span>. This page only reports;
-    trades are placed by <span class="mono">bot.py</span>.
-  </footer>
+  <footer>{footer}</footer>
 </div>
 
 <script>
@@ -636,8 +667,12 @@ document.getElementById('theme').addEventListener('click', () => {{
 # Entry point
 # ---------------------------------------------------------------------------
 
-def build() -> None:
-    """Gather everything and write dashboard.html. Called by bot.py too."""
+def build(public: bool = False, out=None) -> None:
+    """Gather everything and write the page. Called by bot.py too.
+
+    With `public`, the account is never even contacted, so there is nothing
+    sensitive in memory to leak into the page by accident.
+    """
     bot.validate_config()
 
     data = bot.add_moving_averages(bot.fetch_history(config.SYMBOL, CHART_DAYS))
@@ -646,24 +681,34 @@ def build() -> None:
     page = render(
         data, signal, detail,
         find_crossovers(data),
-        gather_account(),
-        gather_runs(),
-        gather_schedule(),
+        {"ok": False, "error": None} if public else gather_account(),
+        [] if public else gather_runs(),
+        None if public else gather_schedule(),
+        public=public,
     )
-    OUTPUT.write_text(page, encoding="utf-8")
+
+    target = Path(out) if out else OUTPUT
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(page, encoding="utf-8")
+    return target
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--open", action="store_true",
                         help="open the dashboard in your browser once built")
+    parser.add_argument("--public", action="store_true",
+                        help="leave out everything about the account, for a "
+                             "page that will be published")
+    parser.add_argument("--out", default=None,
+                        help="write somewhere other than dashboard.html")
     args = parser.parse_args()
 
-    build()
-    print(f"Wrote {OUTPUT}")
+    target = build(public=args.public, out=args.out)
+    print(f"Wrote {target}" + (" (public, no account data)" if args.public else ""))
 
     if args.open:
-        webbrowser.open(OUTPUT.as_uri())
+        webbrowser.open(target.as_uri())
     return 0
 
 
