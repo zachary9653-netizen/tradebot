@@ -33,7 +33,17 @@ python bot.py --log       # as above, but write to logs/bot.log
 
 Start with `--dry-run` until the output reads the way you expect.
 
-## The schedule
+## Running it without your PC on
+
+The task below needs this machine switched on. To run the bot on GitHub's
+machines instead, follow **[SETUP_GITHUB.md](SETUP_GITHUB.md)** - the
+workflow is already written and committed, and about ten minutes of clicking
+on your side finishes it.
+
+Do not leave both running. Two schedulers keep separate memories of what
+they have traded and can both act on the same crossover.
+
+## The schedule (this PC)
 
 A Windows scheduled task named **Tradebot MA Crossover** runs the bot every
 weekday at **9:30 AM Eastern**, as the market opens. This machine is already
@@ -177,6 +187,8 @@ market is closed queues for the next open.
 | `test_crossover.py` | Checks the crossover logic |
 | `state.json` | Written at runtime, remembers the last trade |
 | `logs/bot.log` | Written at runtime, one entry per scheduled run |
+| `SETUP_GITHUB.md` | How to run it in the cloud |
+| `.github/workflows/trade.yml` | The cloud schedule |
 
 ## Worth knowing
 
