@@ -93,6 +93,18 @@ latest bar, and does nothing new.
 
 ## The dashboard
 
+Live, and readable from anywhere:
+
+**<https://zachary9653-netizen.github.io/tradebot/>**
+
+That public page carries market data and the strategy's reading of it, and
+nothing about the account - no balance, holding, order or account number.
+`check_public.py` gates the deploy and fails the build if any of that ever
+appears, so it cannot start leaking by accident later.
+
+The full version, with your balance and orders, stays private: build it
+locally, or download it from any run on the Actions tab.
+
 ```bash
 python dashboard.py --open
 ```
