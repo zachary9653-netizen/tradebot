@@ -1,0 +1,15 @@
+# Your API keys. Never commit this.
+.env
+
+# Rebuilt from scratch on every run, and 56KB of churn per day if tracked.
+# The cloud run publishes it as a downloadable artifact instead.
+dashboard.html
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# state.json and logs/ are deliberately NOT ignored. The cloud run commits
+# them back, which is what lets the bot remember a crossover it has already
+# traded and keep a history you can read.

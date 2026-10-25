@@ -1,0 +1,78 @@
+name: Trading bot
+
+# Runs on GitHub's machines, so your own PC can be off.
+on:
+  schedule:
+    # GitHub cron is always UTC and does not follow daylight saving, so the
+    # market open moves under it twice a year. Both times are listed:
+    # 13:30 UTC is 09:30 ET in summer, 14:30 UTC is 09:30 ET in winter.
+    # The off-season run lands an hour before the open, where a market order
+    # simply queues for it, and state.json stops the second run of the day
+    # trading the same crossover twice.
+    - cron: "30 13 * * 1-5"
+    - cron: "30 14 * * 1-5"
+  # Adds a "Run workflow" button on the Actions tab, so you can trigger it
+  # by hand from your phone.
+  workflow_dispatch:
+
+permissions:
+  # Needed to commit the log and state back to the repository.
+  contents: write
+
+# Never let two runs trade at once.
+concurrency:
+  group: trading-bot
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the bot
+        env:
+          # These come from Settings -> Secrets and variables -> Actions.
+          # They are encrypted, and masked if anything tries to print them.
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: python bot.py --log --dashboard
+
+      - name: Show what happened
+        # Puts the run's output straight on the workflow summary page, so you
+        # can read the result on your phone without downloading anything.
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 25 logs/bot.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard
+          path: dashboard.html
+          retention-days: 30
+
+      - name: Commit the log and state
+        run: |
+          git config user.name "tradebot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "Bot run $(TZ=America/New_York date '+%Y-%m-%d %H:%M %Z')"
+            git push
+          fi

@@ -1,0 +1,57 @@
+
+===== 2026-10-24 18:10:41 =====
+Fetching 100 trading days of AAPL data...
+
+Symbol            AAPL
+Latest bar        2026-10-23
+Close             $347.73
+20-day average     $338.91
+50-day average     $329.47
+Gap               $+9.96 on 2026-10-22 -> $+9.44 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+
+Nothing to do.
+
+===== 2026-10-24 18:11:25 =====
+Fetching 100 trading days of AAPL data...
+
+Symbol            AAPL
+Latest bar        2026-10-23
+Close             $347.73
+20-day average     $338.91
+50-day average     $329.47
+Gap               $+9.96 on 2026-10-22 -> $+9.44 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+
+Nothing to do.
+
+===== 2026-10-24 19:54:32 =====
+Fetching 100 trading days of AAPL data...
+
+Symbol            AAPL
+Latest bar        2026-10-23
+Close             $347.73
+20-day average     $338.91
+50-day average     $329.47
+Gap               $+9.96 on 2026-10-22 -> $+9.44 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+
+Nothing to do.
+
+===== 2026-10-24 20:08:41 =====
+Fetching 100 trading days of AAPL data...
+
+Symbol            AAPL
+Latest bar        2026-10-23
+Close             $347.73
+20-day average     $338.91
+50-day average     $329.47
+Gap               $+9.96 on 2026-10-22 -> $+9.44 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+
+Nothing to do.
+Rebuilt dashboard.html

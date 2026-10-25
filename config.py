@@ -1,0 +1,47 @@
+"""
+Trading bot settings.
+
+Edit the values below to change what the bot trades and how.
+Your API keys do NOT go here - they live in the .env file.
+"""
+
+# ---------------------------------------------------------------------------
+# What to trade
+# ---------------------------------------------------------------------------
+
+# Ticker symbol the bot watches and trades.
+SYMBOL = "AAPL"
+
+# How many shares to buy or sell per signal.
+TRADE_QTY = 1
+
+# ---------------------------------------------------------------------------
+# Strategy
+# ---------------------------------------------------------------------------
+
+# Short moving average period, in trading days. This is the "fast" line.
+SHORT_WINDOW = 20
+
+# Long moving average period, in trading days. This is the "slow" line.
+LONG_WINDOW = 50
+
+# How many trading days of price history to pull from Yahoo Finance.
+# Must be larger than LONG_WINDOW or the slow average never has enough data.
+LOOKBACK_DAYS = 100
+
+# ---------------------------------------------------------------------------
+# Safety
+# ---------------------------------------------------------------------------
+
+# True  -> trade against the Alpaca paper account (fake money).
+# False -> trade against the live account with real money. Leave this True
+#          unless you genuinely mean to risk real funds.
+PAPER_TRADING = True
+
+# Only place one order per crossover. The bot remembers the last bar it acted
+# on in state.json, so re-running it the same day will not trade twice.
+PREVENT_DUPLICATE_TRADES = True
+
+# A sell signal is skipped when you hold no shares, because the Alpaca account
+# has shorting disabled. Set this to False only if your account can short.
+BLOCK_SHORT_SELLS = True

@@ -1,0 +1,7 @@
+# Store text with LF in the repository. The cloud runner is Linux, and a
+# shell step with Windows line endings fails there on the stray carriage
+# returns.
+* text=auto
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.py   text eol=lf
