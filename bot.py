@@ -49,6 +49,7 @@ BUY = "BUY"
 SELL = "SELL"
 
 MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)
 
 
@@ -66,6 +67,38 @@ def start_logging() -> None:
     stream = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
     sys.stdout = stream
     sys.stderr = stream
+
+
+def timing_note(now: datetime | None = None,
+                scheduled: bool | None = None) -> str:
+    """Say where this run sits relative to the opening bell.
+
+    A scheduled run is meant to land shortly before the open. GitHub's
+    scheduler is best-effort and has been hours late, so the log says plainly
+    how late the run actually was rather than leaving it to be worked out
+    from a timestamp. Only a run the scheduler started gets blamed on the
+    scheduler - running it yourself at 7pm is not a fault.
+    """
+    now = now or datetime.now(MARKET_TZ)
+    if scheduled is None:
+        scheduled = os.getenv("GITHUB_EVENT_NAME") == "schedule"
+    bell = now.replace(hour=MARKET_OPEN.hour, minute=MARKET_OPEN.minute,
+                       second=0, microsecond=0)
+    minutes = int((now - bell).total_seconds() // 60)
+
+    if minutes < 0:
+        return f"{-minutes} min before the open. Any order will queue for it."
+    if minutes == 0:
+        return "right at the open."
+    if minutes <= 20:
+        return f"{minutes} min after the open."
+
+    hours, mins = divmod(minutes, 60)
+    late = f"{hours}h {mins:02d}m" if hours else f"{mins} min"
+    if not scheduled:
+        return f"{late} after the open."
+    return (f"{late} after the open - the scheduler was late. The signal is "
+            f"unaffected, but any fill is at the price now, not at the open.")
 
 
 def validate_config() -> None:
@@ -407,6 +440,7 @@ def main() -> int:
         # Always market time. A cloud runner's own clock is UTC, and a log
         # half in UTC and half in Eastern would be unreadable.
         print(f"\n===== {datetime.now(MARKET_TZ):%Y-%m-%d %H:%M:%S %Z} =====")
+        print(f"Started {timing_note()}")
 
     try:
         return decide_and_trade(args)

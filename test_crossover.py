@@ -142,5 +142,29 @@ finally:
     bot.STATE_FILE.unlink(missing_ok=True)
     bot.STATE_FILE = real_state
 
-print(f"\n{'All cases behaved as expected.' if not failures else f'{failures} case(s) failed.'}")
+print("\nLateness reporting:")
+
+for label, (h, m), sched, expect in [
+    ("09:07, on time",        (9, 7),   True,  "before the open"),
+    ("09:29, just early",     (9, 29),  True,  "before the open"),
+    ("09:30, the bell",       (9, 30),  True,  "right at the open"),
+    ("09:45, slightly late",  (9, 45),  True,  "15 min after the open"),
+    ("10:30, an hour late",   (10, 30), True,  "1h 00m after the open"),
+    ("15:29, today's mess",   (15, 29), True,  "5h 59m after the open"),
+    # A scheduled run that late is the scheduler's doing; one you started
+    # yourself at 7pm is not, and must not say so.
+    ("15:29, scheduled",      (15, 29), True,  "the scheduler was late"),
+    ("19:14, run by hand",    (19, 14), False, "9h 44m after the open."),
+]:
+    note = bot.timing_note(datetime.now(ET).replace(hour=h, minute=m),
+                           scheduled=sched)
+    ok = expect in note
+    if label.endswith("by hand"):
+        ok = ok and "scheduler" not in note
+    failures += not ok
+    print(f"  {'pass' if ok else 'FAIL'}  {label:<24} -> {note[:50]}")
+
+print()
+print("All cases behaved as expected." if not failures
+      else f"{failures} case(s) failed.")
 sys.exit(1 if failures else 0)

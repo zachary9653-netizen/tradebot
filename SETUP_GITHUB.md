@@ -96,32 +96,51 @@ Disable-ScheduledTask -TaskName "Tradebot MA Crossover"
 
 ## When it runs
 
-Weekdays at about 9:07 AM Eastern. Treat that as an intention, not a
-promise.
+Weekdays, three attempts each morning: **9:07, 9:23 and 9:41 Eastern**.
 
-GitHub's scheduler is best-effort. It is usually a few minutes late, and on
-27 October 2026 it was **six hours** late here - the 9:30 run started at
-3:29 PM. Nothing was broken; the runs were simply queued. If you check in
-the morning and see nothing, that is the most likely reason.
+### Why three, and why it still is not a promise
 
-The delay does not change what the bot decides. The signal comes from a
-session that has already closed, so waiting cannot alter it. What a late run
-costs you is the opening price - it fills at whatever the market is doing
-when it finally starts.
+**GitHub's scheduler offers no timing guarantee, on any plan.** It queues
+scheduled runs and starts them when it has capacity. On 26 October 2026 it
+was nearly **six hours** late here: the 9:30 run began at 3:29 PM. Nothing
+was broken - the run was simply sitting in a queue. If you check in the
+morning and see nothing, that is far and away the most likely reason.
 
-Two things reduce the damage:
+Nothing in this repository can force GitHub to be punctual. What it can do
+is ask more than once and make lateness obvious:
 
-- The schedule runs at **:07**, not :30. GitHub delays scheduled runs most
-  at busy times, meaning the top of the hour and round numbers. The
-  six-hour delay happened on a :30.
-- A run late enough to land after the 4pm close reads a **different
-  session** from the one an earlier run that day saw. The bot caps itself at
-  one order a day so that cannot become two trades.
+- **Three attempts** at odd minutes. GitHub is slowest at busy times, which
+  means the top of the hour and round minutes like :00, :15 and :30 - the
+  six-hour delay was on a :30. If the first attempt is queued, the second or
+  third may not be.
+- **The extra runs are free of consequences.** The bot refuses a second
+  order on the same crossover, and caps itself at one order a day whatever
+  happens. Attempts after the first find the work done and stop. They cost
+  about a minute of compute each.
+- **Every run says how late it was**, at the top of its log:
 
-The workflow lists two times, 13:07 and 14:07 UTC, because GitHub's
-scheduler does not follow daylight saving and the market open slides under
-it twice a year. One is the real 9:07 ET; the other runs an hour early,
-where a market order simply waits for the open.
+  ```
+  ===== 2026-10-26 15:29:37 EDT =====
+  Started 5h 59m after the open - the scheduler was late.
+  ```
+
+A late run does not change what the bot **decides**. The signal comes from a
+session that has already closed, and waiting cannot alter it. What lateness
+costs is the opening price: the order fills at whatever the market is doing
+when the run finally starts.
+
+The schedule is listed twice in UTC, at 13:xx and 14:xx, because UTC does
+not follow daylight saving and the market open slides under it twice a year.
+13:xx is the morning in summer, 14:xx in winter. Whichever set is an hour
+out lands mid-morning and harmlessly finds the work already done.
+
+### If you need real punctuality
+
+Scheduling from outside GitHub is the only way to improve on this. A free
+cron service such as cron-job.org can call GitHub's API on time and trigger
+the workflow directly. It needs a fine-grained access token stored with that
+service, which is a real trade-off to weigh rather than a free win. Ask and
+it can be set up.
 
 ## Cost
 
