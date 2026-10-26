@@ -16,3 +16,6 @@ venv/
 
 # Built by dashboard.py --public, published by Actions, not committed.
 public/
+
+# Mock-up rendered by the scratch preview script, not part of the project.
+dashboard.preview.html

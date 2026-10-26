@@ -85,8 +85,8 @@ def validate_config() -> None:
         raise SystemExit(f"config error: TRADE_QTY ({config.TRADE_QTY}) must be positive.")
 
 
-def connect() -> TradingClient:
-    """Build an Alpaca client from the keys in .env."""
+def credentials() -> tuple[str, str]:
+    """The Alpaca key pair, from .env locally or the environment in the cloud."""
     load_dotenv(BASE_DIR / ".env")
     api_key = os.getenv("ALPACA_API_KEY", "").strip()
     secret_key = os.getenv("ALPACA_SECRET_KEY", "").strip()
@@ -100,6 +100,12 @@ def connect() -> TradingClient:
             "under Home -> API Keys."
         )
 
+    return api_key, secret_key
+
+
+def connect() -> TradingClient:
+    """Build an Alpaca trading client."""
+    api_key, secret_key = credentials()
     return TradingClient(api_key, secret_key, paper=config.PAPER_TRADING)
 
 

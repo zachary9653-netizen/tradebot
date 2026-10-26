@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 
 from alpaca.common.exceptions import APIError
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockSnapshotRequest
 from alpaca.trading.enums import QueryOrderStatus
 from alpaca.trading.requests import GetOrdersRequest
 
@@ -73,14 +75,18 @@ def gather_account() -> dict:
         orders = client.get_orders(
             filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=10)
         )
+        still_working = {"new", "accepted", "pending_new", "held",
+                         "partially_filled", "accepted_for_bidding"}
         out["orders"] = [
             {
-                "submitted": o.submitted_at.strftime("%Y-%m-%d %H:%M"),
+                "submitted": o.submitted_at.astimezone(bot.MARKET_TZ)
+                              .strftime("%Y-%m-%d %H:%M"),
                 "symbol": o.symbol,
                 "side": o.side.value.upper(),
                 "qty": float(o.qty or 0),
                 "status": o.status.value,
                 "filled": float(o.filled_avg_price) if o.filled_avg_price else None,
+                "open": o.status.value in still_working,
             }
             for o in orders
         ]
@@ -93,6 +99,42 @@ def gather_account() -> dict:
     except Exception as exc:  # the dashboard is still worth showing
         out["error"] = f"{type(exc).__name__}: {exc}"
     return out
+
+
+def gather_quote(symbol: str) -> dict | None:
+    """The current state of the stock itself: last trade, spread, day so far.
+
+    Alpaca's free data is the IEX feed, so the last price can differ a little
+    from the consolidated tape you see on a brokerage site. Close enough to
+    watch a position, not a substitute for a real-time terminal.
+    """
+    try:
+        client = StockHistoricalDataClient(*bot.credentials())
+        snap = client.get_stock_snapshot(
+            StockSnapshotRequest(symbol_or_symbols=symbol)
+        )[symbol]
+
+        last = float(snap.latest_trade.price)
+        prev = float(snap.previous_daily_bar.close)
+        day = snap.daily_bar
+        quote = snap.latest_quote
+
+        return {
+            "last": last,
+            "at": snap.latest_trade.timestamp.astimezone(bot.MARKET_TZ),
+            "prev_close": prev,
+            "change": last - prev,
+            "change_pct": (last - prev) / prev * 100 if prev else 0.0,
+            "open": float(day.open),
+            "high": float(day.high),
+            "low": float(day.low),
+            "volume": int(day.volume),
+            "bid": float(quote.bid_price),
+            "ask": float(quote.ask_price),
+        }
+    except Exception:
+        # The page is still worth showing without a quote.
+        return None
 
 
 def gather_runs() -> list[dict]:
@@ -285,7 +327,7 @@ def tile(label: str, value: str, note: str = "", tone: str = "") -> str:
 
 
 def render(data, signal, detail, crossovers, account, runs, next_run,
-           public: bool = False) -> str:
+           quote=None, public: bool = False) -> str:
     """Build the page. `public` strips everything about the account.
 
     The public page carries market data and the strategy's own reading of it,
@@ -332,6 +374,82 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
                           "cash account, no margin"))
     else:
         tiles.append(tile("Account", "Unavailable", "could not reach Alpaca", "warn"))
+
+    # What the bot is actually holding or waiting on, and what the stock is
+    # doing right now. Only drawn when there is something to show.
+    live_html = ""
+    if not public and account["ok"]:
+        pos = account["position"]
+        pending = [o for o in account.get("orders", []) if o["open"]]
+
+        if pos or pending:
+            rows = []
+            if pending:
+                for o in pending:
+                    rows.append(
+                        f'<div class="live-row"><span class="live-k">Pending</span>'
+                        f'<span class="live-v {"good" if o["side"] == "BUY" else "warn"}">'
+                        f'{o["side"]} {o["qty"]:g} {o["symbol"]}</span>'
+                        f'<span class="live-note">placed {o["submitted"]}, '
+                        f'{o["status"]} - fills at the next open</span></div>'
+                    )
+            if pos:
+                pl = pos["pl"]
+                rows.append(
+                    f'<div class="live-row"><span class="live-k">Holding</span>'
+                    f'<span class="live-v">{pos["qty"]:g} {config.SYMBOL}</span>'
+                    f'<span class="live-note">bought at {money(pos["avg"])}, '
+                    f'now worth {money(pos["value"])}</span></div>'
+                )
+                rows.append(
+                    f'<div class="live-row"><span class="live-k">Profit</span>'
+                    f'<span class="live-v {"good" if pl >= 0 else "warn"}">'
+                    f'{"+" if pl >= 0 else ""}{money(pl)}</span>'
+                    f'<span class="live-note">unrealised, moves with the '
+                    f'price</span></div>'
+                )
+
+            q = quote
+            if q:
+                arrow = "&#9650;" if q["change"] >= 0 else "&#9660;"
+                tone = "good" if q["change"] >= 0 else "warn"
+                rows.append(
+                    f'<div class="live-row"><span class="live-k">Last price</span>'
+                    f'<span class="live-v">{money(q["last"])}</span>'
+                    f'<span class="live-note {tone}">{arrow} {money(abs(q["change"]))} '
+                    f'({q["change_pct"]:+.2f}%) since yesterday\'s close</span></div>'
+                )
+                rows.append(
+                    f'<div class="live-row"><span class="live-k">Today</span>'
+                    f'<span class="live-v">{money(q["low"])} &ndash; {money(q["high"])}</span>'
+                    f'<span class="live-note">opened {money(q["open"])}, '
+                    f'{q["volume"]:,} shares traded</span></div>'
+                )
+                # Only while trading. Outside hours the book is stale and the
+                # spread goes absurdly wide - $326/$351 on a $344 stock -
+                # which looks like a bug rather than the nothing it is.
+                if account.get("market_open"):
+                    rows.append(
+                        f'<div class="live-row"><span class="live-k">Bid / ask</span>'
+                        f'<span class="live-v">{money(q["bid"])} / '
+                        f'{money(q["ask"])}</span>'
+                        f'<span class="live-note">what you could sell and buy '
+                        f'at right now</span></div>'
+                    )
+
+            source = (f"Prices from Alpaca's free IEX feed, read at "
+                      f"{q['at']:%H:%M:%S %Z} when this page was built. They "
+                      f"can differ slightly from a brokerage site, which uses "
+                      f"the full consolidated tape." if q else "")
+            live_html = f"""
+  <h2>{config.SYMBOL} right now</h2>
+  <div class="card">
+    <div class="live">{''.join(rows)}</div>
+    <p class="live-source">{source}
+      <a href="https://app.alpaca.markets/trade/{config.SYMBOL}"
+         target="_blank" rel="noopener">Open the live chart &rarr;</a></p>
+  </div>
+"""
 
     # Orders.
     if public:
@@ -479,6 +597,29 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
   .tile.warn .tile-value {{ color:var(--warn); }}
   .card {{ background:var(--surface-1); border:1px solid var(--border);
            border-radius:11px; padding:14px 16px; }}
+  .live {{ display:grid; gap:1px; background:var(--border);
+           border:1px solid var(--border); border-radius:9px;
+           overflow:hidden; }}
+  .live-row {{ display:grid; gap:2px 14px; padding:10px 13px;
+               background:var(--surface-1);
+               grid-template-columns:92px minmax(0,auto) 1fr;
+               align-items:baseline; }}
+  .live-k {{ font-size:11.5px; color:var(--text-muted);
+             text-transform:uppercase; letter-spacing:0.06em; }}
+  .live-v {{ font-size:19px; letter-spacing:-0.01em;
+             font-variant-numeric:tabular-nums; }}
+  .live-v.good {{ color:var(--good); }}
+  .live-v.warn {{ color:var(--warn); }}
+  .live-note {{ font-size:12.5px; color:var(--text-secondary); }}
+  .live-note.good {{ color:var(--good); }}
+  .live-note.warn {{ color:var(--warn); }}
+  .live-source {{ font-size:12px; color:var(--text-muted); margin:11px 0 0; }}
+  .live-source a {{ color:var(--series-short); text-decoration:none;
+                    white-space:nowrap; }}
+  .live-source a:hover {{ text-decoration:underline; }}
+  @media (max-width:560px) {{
+    .live-row {{ grid-template-columns:1fr; }}
+  }}
   .chart-wrap {{ position:relative; }}
   /* Scale uniformly. Stretching the viewBox to a fixed height turns the
      signal markers into ellipses and squashes every label. */
@@ -550,6 +691,7 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
   {banner}
 
   <div class="tiles">{''.join(tiles)}</div>
+  {live_html}
 
   <h2>Price and the two averages &middot; last {len(points)} trading days</h2>
   <div class="card chart-wrap">
@@ -684,6 +826,7 @@ def build(public: bool = False, out=None) -> None:
         {"ok": False, "error": None} if public else gather_account(),
         [] if public else gather_runs(),
         None if public else gather_schedule(),
+        quote=None if public else gather_quote(config.SYMBOL),
         public=public,
     )
 
