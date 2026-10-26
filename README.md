@@ -176,6 +176,11 @@ The bot refuses to trade rather than do something you did not intend:
 
 - **One order per crossover.** The bar it acted on is recorded in
   `state.json`, so running the bot twice in a day will not double up.
+- **One order per day, whatever happens.** The schedule fires twice daily for
+  daylight-saving cover. A badly delayed run can land after the 4pm close,
+  where the last completed session is no longer the one an earlier run saw -
+  two runs, two different bars, and to the per-crossover check above, two
+  different crossovers. The day cap is what stops that becoming two orders.
 - **No accidental shorts.** A sell signal is skipped when you hold fewer
   shares than `TRADE_QTY`. Your Alpaca account has shorting disabled, so the
   order would be rejected anyway.

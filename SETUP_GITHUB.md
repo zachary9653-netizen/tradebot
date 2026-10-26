@@ -96,19 +96,32 @@ Disable-ScheduledTask -TaskName "Tradebot MA Crossover"
 
 ## When it runs
 
-Weekdays at 9:30 AM Eastern, give or take.
+Weekdays at about 9:07 AM Eastern. Treat that as an intention, not a
+promise.
 
-GitHub's scheduler is best-effort and often starts 5 to 20 minutes late,
-sometimes more when lots of people are queued. That is worth understanding
-rather than worrying about: the signal comes from the **previous day's
-close**, which cannot change while you wait, so a late start moves the price
-you get filled at, not the decision the bot makes.
+GitHub's scheduler is best-effort. It is usually a few minutes late, and on
+27 October 2026 it was **six hours** late here - the 9:30 run started at
+3:29 PM. Nothing was broken; the runs were simply queued. If you check in
+the morning and see nothing, that is the most likely reason.
 
-The workflow lists two times, 13:30 and 14:30 UTC, because GitHub's
+The delay does not change what the bot decides. The signal comes from a
+session that has already closed, so waiting cannot alter it. What a late run
+costs you is the opening price - it fills at whatever the market is doing
+when it finally starts.
+
+Two things reduce the damage:
+
+- The schedule runs at **:07**, not :30. GitHub delays scheduled runs most
+  at busy times, meaning the top of the hour and round numbers. The
+  six-hour delay happened on a :30.
+- A run late enough to land after the 4pm close reads a **different
+  session** from the one an earlier run that day saw. The bot caps itself at
+  one order a day so that cannot become two trades.
+
+The workflow lists two times, 13:07 and 14:07 UTC, because GitHub's
 scheduler does not follow daylight saving and the market open slides under
-it twice a year. One of the two is the real 9:30 ET; the other runs an hour
-early, where a market order simply waits for the open. `state.json` stops
-the second run of the day trading the same crossover again.
+it twice a year. One is the real 9:07 ET; the other runs an hour early,
+where a market order simply waits for the open.
 
 ## Cost
 

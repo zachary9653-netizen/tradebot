@@ -5,12 +5,18 @@ on:
   schedule:
     # GitHub cron is always UTC and does not follow daylight saving, so the
     # market open moves under it twice a year. Both times are listed:
-    # 13:30 UTC is 09:30 ET in summer, 14:30 UTC is 09:30 ET in winter.
-    # The off-season run lands an hour before the open, where a market order
-    # simply queues for it, and state.json stops the second run of the day
-    # trading the same crossover twice.
-    - cron: "30 13 * * 1-5"
-    - cron: "30 14 * * 1-5"
+    # 13:07 UTC is 09:07 ET in summer, 14:07 UTC is 09:07 ET in winter.
+    #
+    # The minute is deliberately odd. GitHub queues scheduled runs and warns
+    # that they are delayed most at busy times, which means the top of the
+    # hour and round numbers like :00, :15 and :30. A run at :30 was once
+    # delayed about six hours here.
+    #
+    # Being early is safe: the signal comes from a session that has already
+    # closed, and a market order placed before the open just waits for it.
+    # Being late is survivable but costs you the opening price, so aim early.
+    - cron: "7 13 * * 1-5"
+    - cron: "7 14 * * 1-5"
   # Adds a "Run workflow" button on the Actions tab, so you can trigger it
   # by hand from your phone.
   workflow_dispatch:

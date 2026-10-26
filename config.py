@@ -42,6 +42,13 @@ PAPER_TRADING = True
 # on in state.json, so re-running it the same day will not trade twice.
 PREVENT_DUPLICATE_TRADES = True
 
+# At most one order a day, whatever happens. The schedule fires twice a day
+# for daylight-saving cover, and a badly delayed run can land after the 4pm
+# close - where the last completed session is a different one from the
+# session an earlier run saw. Without this, those two runs are two different
+# crossovers to the check above, and both would trade.
+ONE_TRADE_PER_DAY = True
+
 # A sell signal is skipped when you hold no shares, because the Alpaca account
 # has shorting disabled. Set this to False only if your account can short.
 BLOCK_SHORT_SELLS = True

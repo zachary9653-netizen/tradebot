@@ -222,7 +222,12 @@ def read_state() -> dict:
 
 def write_state(symbol: str, signal: str, bar_date: str, order_id: str) -> None:
     state = read_state()
-    state[symbol] = {"signal": signal, "bar_date": bar_date, "order_id": order_id}
+    state[symbol] = {
+        "signal": signal,
+        "bar_date": bar_date,
+        "order_id": order_id,
+        "traded_on": datetime.now(MARKET_TZ).date().isoformat(),
+    }
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
@@ -230,6 +235,21 @@ def already_traded(symbol: str, signal: str, bar_date: str) -> bool:
     """True when this exact crossover has already been acted on."""
     last = read_state().get(symbol)
     return bool(last and last["bar_date"] == bar_date and last["signal"] == signal)
+
+
+def already_traded_today(symbol: str) -> str | None:
+    """The bar we traded on earlier today, or None.
+
+    A day can hold more than one scheduled run, and a late one can land on
+    the far side of the 4pm close - where the session it treats as the last
+    completed one is no longer the same session an earlier run saw. Two runs,
+    two different bars, two orders. This caps the day at one.
+    """
+    last = read_state().get(symbol)
+    if not last:
+        return None
+    today = datetime.now(MARKET_TZ).date().isoformat()
+    return last["bar_date"] if last.get("traded_on") == today else None
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +436,15 @@ def decide_and_trade(args) -> int:
         print(f"\nAlready traded this crossover ({details['current_date']}). "
               f"Nothing to do.")
         return 0
+
+    if config.ONE_TRADE_PER_DAY:
+        traded_bar = already_traded_today(config.SYMBOL)
+        if traded_bar:
+            print(f"\nAlready placed an order today, on the {traded_bar} "
+                  f"session. This run reads the {details['current_date']} "
+                  f"session, so acting would mean two orders in one day. "
+                  f"Leaving it for tomorrow.")
+            return 0
 
     if args.dry_run:
         print(f"\nDry run: would place a {signal} order for "

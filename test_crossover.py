@@ -101,5 +101,46 @@ old = pd.DataFrame({"Close": [10.0]}, index=pd.date_range(end="2026-10-23", peri
 kept = bot.drop_unfinished_session(old, now=datetime.now(ET).replace(hour=9, minute=30))
 check("yesterday's bar at 09:30", len(kept), 1)
 
+
+print("\nOne trade per day, across the 4pm boundary:")
+
+import json
+from datetime import timedelta
+
+# Work on a scratch state file so the real one is untouched.
+real_state = bot.STATE_FILE
+bot.STATE_FILE = real_state.parent / "state.test.json"
+try:
+    today = datetime.now(ET).date().isoformat()
+    yesterday = (datetime.now(ET).date() - timedelta(days=1)).isoformat()
+
+    bot.STATE_FILE.write_text("{}")
+    check("nothing traded yet", bot.already_traded_today("AAPL"), None)
+
+    # Today's 3:29pm run buys on Friday's bar - exactly what happened.
+    bot.write_state("AAPL", "BUY", "2026-10-23", "order-1")
+    check("after a trade today", bot.already_traded_today("AAPL"), "2026-10-23")
+
+    # The 4:04pm run now reads a DIFFERENT bar. The old bar-date check lets
+    # it through; the day cap is what stops it.
+    check("old check would allow it",
+          bot.already_traded("AAPL", "BUY", "2026-10-26"), False)
+    check("day cap blocks it",
+          bot.already_traded_today("AAPL") is not None, True)
+
+    # A trade from yesterday must not block today.
+    state = json.loads(bot.STATE_FILE.read_text())
+    state["AAPL"]["traded_on"] = yesterday
+    bot.STATE_FILE.write_text(json.dumps(state))
+    check("yesterday's trade does not block", bot.already_traded_today("AAPL"), None)
+
+    # State written before this fix existed has no traded_on at all.
+    bot.STATE_FILE.write_text(json.dumps(
+        {"AAPL": {"signal": "BUY", "bar_date": "2026-10-23", "order_id": "old"}}))
+    check("state from before the fix", bot.already_traded_today("AAPL"), None)
+finally:
+    bot.STATE_FILE.unlink(missing_ok=True)
+    bot.STATE_FILE = real_state
+
 print(f"\n{'All cases behaved as expected.' if not failures else f'{failures} case(s) failed.'}")
 sys.exit(1 if failures else 0)
