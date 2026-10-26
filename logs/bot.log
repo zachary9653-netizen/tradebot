@@ -85,3 +85,20 @@ Signal            none - the averages did not cross. The fast line stayed above 
 
 Nothing to do.
 Rebuilt dashboard.html
+
+===== 2026-10-26 15:29:37 EDT =====
+Fetching 100 trading days of AAPL data...
+Ignoring today's unfinished bar (2026-10-26); deciding on the last completed session.
+
+Symbol            AAPL
+Latest bar        2026-10-23
+Close             $347.73
+20-day average     $338.91
+50-day average     $329.47
+Gap               $+9.96 on 2026-10-22 -> $+9.44 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+
+Nothing to do.
+Ignoring today's unfinished bar (2026-10-26); deciding on the last completed session.
+Rebuilt dashboard.html
