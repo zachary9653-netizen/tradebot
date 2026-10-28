@@ -417,3 +417,21 @@ Signal            none - the averages did not cross. The fast line stayed above 
 Nothing to do.
 Ignoring today's unfinished bar (2026-10-28); deciding on the last completed session.
 Rebuilt dashboard.html
+
+===== 2026-10-28 15:50:33 EDT =====
+Started 6h 20m after the open - the scheduler was late. The signal is unaffected, but any fill is at the price now, not at the open.
+Fetching 100 trading days of AAPL data...
+Ignoring today's unfinished bar (2026-10-28); deciding on the last completed session.
+
+Symbol            AAPL
+Latest bar        2026-10-27
+Close             $347.10
+20-day average     $340.07
+50-day average     $331.06
+Gap               $+8.96 on 2026-10-26 -> $+9.01 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+
+Nothing to do.
+Ignoring today's unfinished bar (2026-10-28); deciding on the last completed session.
+Rebuilt dashboard.html
