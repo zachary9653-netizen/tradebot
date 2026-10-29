@@ -48,7 +48,7 @@ ML, MR, MT, MB = 64, 76, 20, 34
 
 def gather_account() -> dict:
     """Read the account, position, orders and clock. Never raises."""
-    out: dict = {"ok": False, "error": None}
+    out: dict = {"ok": False, "error": None, "positions": {}, "orders": []}
     try:
         client = bot.connect()
         account = client.get_account()
@@ -61,16 +61,19 @@ def gather_account() -> dict:
             buying_power=float(account.buying_power),
         )
 
-        try:
-            p = client.get_open_position(config.SYMBOL)
-            out["position"] = {
-                "qty": float(p.qty),
-                "avg": float(p.avg_entry_price),
-                "value": float(p.market_value),
-                "pl": float(p.unrealized_pl),
-            }
-        except APIError:
-            out["position"] = None
+        out["positions"] = {}
+        for symbol in bot.symbols():
+            try:
+                p = client.get_open_position(symbol)
+                out["positions"][symbol] = {
+                    "qty": float(p.qty),
+                    "avg": float(p.avg_entry_price),
+                    "value": float(p.market_value),
+                    "pl": float(p.unrealized_pl),
+                }
+            except APIError:
+                # Alpaca answers 404 for a symbol with no open position.
+                out["positions"][symbol] = None
 
         orders = client.get_orders(
             filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=10)
@@ -172,10 +175,12 @@ def gather_schedule() -> str | None:
         state = re.search(r"Scheduled Task State:\s*(.+)", raw)
         if not nxt:
             return None
-        label = nxt.group(1).strip()
         if state and state.group(1).strip().lower() != "enabled":
-            return f"{label} (task is disabled)"
-        return label
+            # The Windows task is off on purpose - GitHub Actions runs the
+            # bot now. Reporting a next run for a disabled task would be a
+            # lie, and naming the cloud schedule here would be guesswork.
+            return None
+        return nxt.group(1).strip()
     except Exception:
         return None
 
@@ -207,7 +212,7 @@ def find_crossovers(data) -> list[dict]:
 # Chart
 # ---------------------------------------------------------------------------
 
-def build_chart(data, crossovers) -> tuple[str, list[dict]]:
+def build_chart(data, crossovers, symbol: str) -> tuple[str, list[dict]]:
     """Return the SVG body and the per-point series the tooltip reads."""
     closes = data["Close"].tolist()
     short = data["sma_short"].tolist()
@@ -277,7 +282,7 @@ def build_chart(data, crossovers) -> tuple[str, list[dict]]:
 
     svg = f"""
     <svg viewBox="0 0 {W} {H}" class="chart"
-         role="img" aria-label="{config.SYMBOL} close with the
+         role="img" aria-label="{symbol} close with the
          {config.SHORT_WINDOW} and {config.LONG_WINDOW} day moving averages">
       {''.join(grid)}
       <polyline class="line s-close" points="{path(closes)}"/>
@@ -285,11 +290,11 @@ def build_chart(data, crossovers) -> tuple[str, list[dict]]:
       <polyline class="line s-short" points="{path(short)}"/>
       {''.join(marks)}
       {''.join(labels)}
-      <line id="crosshair" x1="0" y1="{MT}" x2="0" y2="{H - MB}"/>
-      <circle id="dot-close" r="4"/>
-      <circle id="dot-short" r="4"/>
-      <circle id="dot-long"  r="4"/>
-      <rect id="hit" x="{ML}" y="{MT}" width="{W - ML - MR}"
+      <line class="crosshair" x1="0" y1="{MT}" x2="0" y2="{H - MB}"/>
+      <circle class="dot dot-close" r="4"/>
+      <circle class="dot dot-short" r="4"/>
+      <circle class="dot dot-long"  r="4"/>
+      <rect class="hit" x="{ML}" y="{MT}" width="{W - ML - MR}"
             height="{H - MT - MB}" fill="transparent"/>
     </svg>
     """
@@ -326,130 +331,200 @@ def tile(label: str, value: str, note: str = "", tone: str = "") -> str:
     )
 
 
-def render(data, signal, detail, crossovers, account, runs, next_run,
-           quote=None, public: bool = False) -> str:
+def signal_wording(signal, detail) -> tuple[str, str, str]:
+    """The headline value, tone and explanation for one symbol's signal."""
+    if signal == bot.BUY:
+        return ("BUY", "good",
+                f"{config.SHORT_WINDOW}-day crossed above the "
+                f"{config.LONG_WINDOW}-day")
+    if signal == bot.SELL:
+        return ("SELL", "warn",
+                f"{config.SHORT_WINDOW}-day crossed below the "
+                f"{config.LONG_WINDOW}-day")
+    side = "above" if detail["current_gap"] > 0 else "below"
+    return ("No signal", "",
+            f"fast line sitting {side} the slow one, no crossing")
+
+
+def live_panel(symbol, account, quote) -> str:
+    """Holding, working order and the stock's own state. Empty when flat."""
+    if not account["ok"]:
+        return ""
+
+    pos = account["positions"].get(symbol)
+    pending = [o for o in account.get("orders", [])
+               if o["open"] and o["symbol"] == symbol]
+    if not pos and not pending:
+        return ""
+
+    rows = []
+    for o in pending:
+        rows.append(
+            f'<div class="live-row"><span class="live-k">Pending</span>'
+            f'<span class="live-v {"good" if o["side"] == "BUY" else "warn"}">'
+            f'{o["side"]} {o["qty"]:g} {o["symbol"]}</span>'
+            f'<span class="live-note">placed {o["submitted"]}, '
+            f'{o["status"]} - fills at the next open</span></div>'
+        )
+    if pos:
+        pl = pos["pl"]
+        rows.append(
+            f'<div class="live-row"><span class="live-k">Holding</span>'
+            f'<span class="live-v">{pos["qty"]:g} {symbol}</span>'
+            f'<span class="live-note">bought at {money(pos["avg"])}, '
+            f'now worth {money(pos["value"])}</span></div>'
+        )
+        rows.append(
+            f'<div class="live-row"><span class="live-k">Profit</span>'
+            f'<span class="live-v {"good" if pl >= 0 else "warn"}">'
+            f'{"+" if pl >= 0 else ""}{money(pl)}</span>'
+            f'<span class="live-note">unrealised, moves with the price</span></div>'
+        )
+
+    q = quote
+    if q:
+        arrow = "&#9650;" if q["change"] >= 0 else "&#9660;"
+        tone = "good" if q["change"] >= 0 else "warn"
+        rows.append(
+            f'<div class="live-row"><span class="live-k">Last price</span>'
+            f'<span class="live-v">{money(q["last"])}</span>'
+            f'<span class="live-note {tone}">{arrow} {money(abs(q["change"]))} '
+            f'({q["change_pct"]:+.2f}%) since yesterday\'s close</span></div>'
+        )
+        rows.append(
+            f'<div class="live-row"><span class="live-k">Today</span>'
+            f'<span class="live-v">{money(q["low"])} &ndash; {money(q["high"])}</span>'
+            f'<span class="live-note">opened {money(q["open"])}, '
+            f'{q["volume"]:,} shares traded</span></div>'
+        )
+        # Only while trading. Outside hours the book is stale and the spread
+        # goes absurdly wide - $326/$351 on a $344 stock - which looks like a
+        # bug rather than the nothing it is.
+        if account.get("market_open"):
+            rows.append(
+                f'<div class="live-row"><span class="live-k">Bid / ask</span>'
+                f'<span class="live-v">{money(q["bid"])} / {money(q["ask"])}</span>'
+                f'<span class="live-note">what you could sell and buy at '
+                f'right now</span></div>'
+            )
+
+    source = (f"Prices from Alpaca's free IEX feed, read at "
+              f"{q['at']:%H:%M:%S %Z} when this page was built. They can "
+              f"differ slightly from a brokerage site, which uses the full "
+              f"consolidated tape." if q else "")
+
+    return f"""
+  <div class="card">
+    <div class="live">{''.join(rows)}</div>
+    <p class="live-source">{source}
+      <a href="https://app.alpaca.markets/trade/{symbol}"
+         target="_blank" rel="noopener">Open the live chart &rarr;</a></p>
+  </div>
+"""
+
+
+def crossover_table(crossovers) -> str:
+    if not crossovers:
+        return '<p class="empty">No crossovers in this window.</p>'
+    rows = "".join(
+        f"<tr><td>{c['date']}</td>"
+        f"<td class=\"{'good' if c['side'] == bot.BUY else 'warn'}\">{c['side']}</td>"
+        f"<td class=\"num\">{money(c['close'])}</td></tr>"
+        for c in reversed(crossovers)
+    )
+    return ("<table><thead><tr><th>Date</th><th>Signal</th>"
+            f"<th class='num'>Close</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>")
+
+
+def symbol_section(block, account, public, uid) -> tuple[str, list]:
+    """Everything the page says about one symbol. Returns (html, points)."""
+    symbol = block["symbol"]
+    detail = block["detail"]
+    svg, points = build_chart(block["data"], block["crossovers"], symbol)
+
+    value, tone, note = signal_wording(block["signal"], detail)
+    tiles = [
+        tile("Signal", value, note, tone),
+        tile("Last close", money(detail["close"]),
+             f"session of {detail['current_date']}"),
+        tile(f"{config.SHORT_WINDOW}-day average", money(detail["sma_short"]),
+             "the fast line"),
+        tile(f"{config.LONG_WINDOW}-day average", money(detail["sma_long"]),
+             "the slow line"),
+    ]
+
+    recent = "".join(
+        f"<tr><td>{p['d']}</td><td class='num'>{p['c']:,.2f}</td>"
+        f"<td class='num'>{'-' if p['s'] is None else format(p['s'], ',.2f')}</td>"
+        f"<td class='num'>{'-' if p['l'] is None else format(p['l'], ',.2f')}</td></tr>"
+        for p in points[-30:][::-1]
+    )
+
+    live = "" if public else live_panel(symbol, account, block.get("quote"))
+
+    html_out = f"""
+  <section class="symbol">
+    <h2 class="symbol-name">{symbol}</h2>
+    <div class="tiles">{''.join(tiles)}</div>
+    {live}
+    <div class="card chart-wrap" data-uid="{uid}">
+      {svg}
+      <div class="tip"></div>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--series-close)"></i>Close</span>
+        <span><i class="sw" style="background:var(--series-short)"></i>{config.SHORT_WINDOW}-day average</span>
+        <span><i class="sw" style="background:var(--series-long)"></i>{config.LONG_WINDOW}-day average</span>
+        <span><i class="sw" style="background:var(--good);border-radius:50%"></i>Buy signal</span>
+        <span><i class="sw" style="background:var(--warn);border-radius:50%"></i>Sell signal</span>
+      </div>
+      <details>
+        <summary>Show the last 30 days as a table</summary>
+        <table style="margin-top:10px">
+          <thead><tr><th>Date</th><th class="num">Close</th>
+          <th class="num">{config.SHORT_WINDOW}-day</th>
+          <th class="num">{config.LONG_WINDOW}-day</th></tr></thead>
+          <tbody>{recent}</tbody>
+        </table>
+      </details>
+    </div>
+    <h3>Crossovers in this window</h3>
+    <div class="card">{crossover_table(block['crossovers'])}</div>
+  </section>
+"""
+    return html_out, points
+
+
+def render(blocks, account, runs, next_run, public: bool = False) -> str:
     """Build the page. `public` strips everything about the account.
 
     The public page carries market data and the strategy's own reading of it,
     both of which anyone could work out from public prices. It carries no
     balance, no position, no orders, no account number and no run log.
     """
-    svg, points = build_chart(data, crossovers)
+    sections, series = [], {}
+    for uid, block in enumerate(blocks):
+        section_html, points = symbol_section(block, account, public, uid)
+        sections.append(section_html)
+        series[str(uid)] = points
+    series_js = series
 
-    # Headline tiles.
-    if signal == bot.BUY:
-        sig_value, sig_tone = "BUY", "good"
-        sig_note = f"{config.SHORT_WINDOW}-day crossed above the {config.LONG_WINDOW}-day"
-    elif signal == bot.SELL:
-        sig_value, sig_tone = "SELL", "warn"
-        sig_note = f"{config.SHORT_WINDOW}-day crossed below the {config.LONG_WINDOW}-day"
-    else:
-        sig_value, sig_tone = "No signal", ""
-        side = "above" if detail["current_gap"] > 0 else "below"
-        sig_note = f"fast line sitting {side} the slow one, no crossing"
-
-    tiles = [tile("Signal", sig_value, sig_note, sig_tone)]
-    if public:
-        # Market facts only. Nothing here is specific to the account.
-        tiles.append(tile("Last close", money(detail["close"]),
-                          f"session of {detail['current_date']}"))
-        tiles.append(tile(f"{config.SHORT_WINDOW}-day average",
-                          money(detail["sma_short"]), "the fast line"))
-        tiles.append(tile(f"{config.LONG_WINDOW}-day average",
-                          money(detail["sma_long"]), "the slow line"))
-    elif account["ok"]:
-        pos = account["position"]
-        if pos:
-            pl = pos["pl"]
-            tiles.append(tile(
-                f"{config.SYMBOL} position", f"{pos['qty']:g} share(s)",
-                f"avg {money(pos['avg'])} &middot; {money(pl)} unrealised",
-                "good" if pl >= 0 else "warn",
-            ))
+    # Account tiles sit once at the top, above the per-symbol sections.
+    account_tiles = ""
+    if not public:
+        if account["ok"]:
+            held = sum(1 for p in account["positions"].values() if p)
+            account_tiles = "".join([
+                tile("Account value", money(account["value"]),
+                     f"{money(account['cash'])} cash"),
+                tile("Buying power", money(account["buying_power"]),
+                     "cash account, no margin"),
+                tile("Holdings", f"{held} of {len(blocks)}",
+                     "symbols currently held"),
+            ])
         else:
-            tiles.append(tile(f"{config.SYMBOL} position", "None", "flat, all cash"))
-        tiles.append(tile("Account value", money(account["value"]),
-                          f"{money(account['cash'])} cash"))
-        tiles.append(tile("Buying power", money(account["buying_power"]),
-                          "cash account, no margin"))
-    else:
-        tiles.append(tile("Account", "Unavailable", "could not reach Alpaca", "warn"))
-
-    # What the bot is actually holding or waiting on, and what the stock is
-    # doing right now. Only drawn when there is something to show.
-    live_html = ""
-    if not public and account["ok"]:
-        pos = account["position"]
-        pending = [o for o in account.get("orders", []) if o["open"]]
-
-        if pos or pending:
-            rows = []
-            if pending:
-                for o in pending:
-                    rows.append(
-                        f'<div class="live-row"><span class="live-k">Pending</span>'
-                        f'<span class="live-v {"good" if o["side"] == "BUY" else "warn"}">'
-                        f'{o["side"]} {o["qty"]:g} {o["symbol"]}</span>'
-                        f'<span class="live-note">placed {o["submitted"]}, '
-                        f'{o["status"]} - fills at the next open</span></div>'
-                    )
-            if pos:
-                pl = pos["pl"]
-                rows.append(
-                    f'<div class="live-row"><span class="live-k">Holding</span>'
-                    f'<span class="live-v">{pos["qty"]:g} {config.SYMBOL}</span>'
-                    f'<span class="live-note">bought at {money(pos["avg"])}, '
-                    f'now worth {money(pos["value"])}</span></div>'
-                )
-                rows.append(
-                    f'<div class="live-row"><span class="live-k">Profit</span>'
-                    f'<span class="live-v {"good" if pl >= 0 else "warn"}">'
-                    f'{"+" if pl >= 0 else ""}{money(pl)}</span>'
-                    f'<span class="live-note">unrealised, moves with the '
-                    f'price</span></div>'
-                )
-
-            q = quote
-            if q:
-                arrow = "&#9650;" if q["change"] >= 0 else "&#9660;"
-                tone = "good" if q["change"] >= 0 else "warn"
-                rows.append(
-                    f'<div class="live-row"><span class="live-k">Last price</span>'
-                    f'<span class="live-v">{money(q["last"])}</span>'
-                    f'<span class="live-note {tone}">{arrow} {money(abs(q["change"]))} '
-                    f'({q["change_pct"]:+.2f}%) since yesterday\'s close</span></div>'
-                )
-                rows.append(
-                    f'<div class="live-row"><span class="live-k">Today</span>'
-                    f'<span class="live-v">{money(q["low"])} &ndash; {money(q["high"])}</span>'
-                    f'<span class="live-note">opened {money(q["open"])}, '
-                    f'{q["volume"]:,} shares traded</span></div>'
-                )
-                # Only while trading. Outside hours the book is stale and the
-                # spread goes absurdly wide - $326/$351 on a $344 stock -
-                # which looks like a bug rather than the nothing it is.
-                if account.get("market_open"):
-                    rows.append(
-                        f'<div class="live-row"><span class="live-k">Bid / ask</span>'
-                        f'<span class="live-v">{money(q["bid"])} / '
-                        f'{money(q["ask"])}</span>'
-                        f'<span class="live-note">what you could sell and buy '
-                        f'at right now</span></div>'
-                    )
-
-            source = (f"Prices from Alpaca's free IEX feed, read at "
-                      f"{q['at']:%H:%M:%S %Z} when this page was built. They "
-                      f"can differ slightly from a brokerage site, which uses "
-                      f"the full consolidated tape." if q else "")
-            live_html = f"""
-  <h2>{config.SYMBOL} right now</h2>
-  <div class="card">
-    <div class="live">{''.join(rows)}</div>
-    <p class="live-source">{source}
-      <a href="https://app.alpaca.markets/trade/{config.SYMBOL}"
-         target="_blank" rel="noopener">Open the live chart &rarr;</a></p>
-  </div>
-"""
+            account_tiles = tile("Account", "Unavailable",
+                                 "could not reach Alpaca", "warn")
 
     # Orders.
     if public:
@@ -470,19 +545,6 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
     else:
         orders_html = '<p class="empty">No orders yet. The bot has not traded.</p>'
 
-    # Crossover history.
-    if crossovers:
-        rows = "".join(
-            f"<tr><td>{c['date']}</td>"
-            f"<td class=\"{'good' if c['side'] == bot.BUY else 'warn'}\">{c['side']}</td>"
-            f"<td class=\"num\">{money(c['close'])}</td></tr>"
-            for c in reversed(crossovers)
-        )
-        cross_html = ("<table><thead><tr><th>Date</th><th>Signal</th>"
-                      f"<th class='num'>Close</th></tr></thead><tbody>{rows}</tbody></table>")
-    else:
-        cross_html = '<p class="empty">No crossovers in this window.</p>'
-
     # Recent runs.
     if public:
         runs_html = ""
@@ -497,14 +559,6 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
                      f"</tr></thead><tbody>{rows}</tbody></table>")
     else:
         runs_html = '<p class="empty">No runs logged yet.</p>'
-
-    # The table view the accessibility pass requires.
-    recent = "".join(
-        f"<tr><td>{p['d']}</td><td class='num'>{p['c']:,.2f}</td>"
-        f"<td class='num'>{'-' if p['s'] is None else format(p['s'], ',.2f')}</td>"
-        f"<td class='num'>{'-' if p['l'] is None else format(p['l'], ',.2f')}</td></tr>"
-        for p in points[-30:][::-1]
-    )
 
     market = ""
     if not public and account["ok"]:
@@ -533,15 +587,17 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
     banner = ""
     if not public and not account["ok"]:
         banner = (f'<div class="banner">Could not reach Alpaca, so the balance and '
-                  f'orders are missing. The chart and signal below are still live.'
+                  f'orders are missing. The charts and signals below are still live.'
                   f'<br><span class="mono">{html.escape(account["error"] or "")}</span></div>')
+
+    watched = ", ".join(b["symbol"] for b in blocks)
 
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{config.SYMBOL} crossover bot</title>
+<title>{watched} crossover bot</title>
 <style>
   :root {{
     color-scheme: light;
@@ -577,6 +633,16 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
             justify-content:space-between; margin-bottom:4px; }}
   h1 {{ font-size:22px; margin:0; letter-spacing:-0.01em; }}
   h2 {{ font-size:15px; margin:34px 0 10px; letter-spacing:-0.01em; }}
+  h3 {{ font-size:13px; margin:18px 0 8px; letter-spacing:-0.01em;
+        color:var(--text-secondary); font-weight:600; }}
+  /* Each symbol is its own band, so a page of several reads as a list
+     rather than one long undifferentiated scroll. */
+  .symbol {{ margin-top:38px; padding-top:4px;
+             border-top:1px solid var(--border); }}
+  .symbol:first-of-type {{ border-top:none; }}
+  .symbol-name {{ font-size:20px; margin:16px 0 12px;
+                  letter-spacing:-0.02em; }}
+  .symbol .tiles {{ margin-top:0; }}
   .sub {{ color:var(--text-secondary); font-size:13px; }}
   .mono {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; }}
   button {{ font:inherit; font-size:13px; padding:5px 11px; cursor:pointer;
@@ -637,21 +703,20 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
   .mark-ring {{ fill:var(--surface-1); }}
   .mark.buy  {{ fill:var(--good); }}
   .mark.sell {{ fill:var(--warn); }}
-  #crosshair {{ stroke:var(--text-muted); stroke-width:1;
+  .crosshair {{ stroke:var(--text-muted); stroke-width:1;
                 stroke-dasharray:3 3; opacity:0; }}
-  #dot-close,#dot-short,#dot-long {{ opacity:0; stroke:var(--surface-1);
-                                     stroke-width:2; }}
-  #dot-close {{ fill:var(--series-close); }}
-  #dot-short {{ fill:var(--series-short); }}
-  #dot-long  {{ fill:var(--series-long); }}
-  #tip {{ position:absolute; pointer-events:none; opacity:0; z-index:5;
+  .dot {{ opacity:0; stroke:var(--surface-1); stroke-width:2; }}
+  .dot-close {{ fill:var(--series-close); }}
+  .dot-short {{ fill:var(--series-short); }}
+  .dot-long  {{ fill:var(--series-long); }}
+  .tip {{ position:absolute; pointer-events:none; opacity:0; z-index:5;
           background:var(--surface-1); border:1px solid var(--border);
           border-radius:9px; padding:9px 11px; font-size:12.5px;
           min-width:160px; box-shadow:0 6px 20px rgba(0,0,0,.14); }}
-  #tip .d {{ color:var(--text-muted); margin-bottom:5px; }}
-  #tip .r {{ display:flex; align-items:center; gap:7px;
+  .tip .d {{ color:var(--text-muted); margin-bottom:5px; }}
+  .tip .r {{ display:flex; align-items:center; gap:7px;
              justify-content:space-between; }}
-  #tip .n {{ display:flex; align-items:center; gap:7px;
+  .tip .n {{ display:flex; align-items:center; gap:7px;
              color:var(--text-secondary); }}
   .sw {{ width:9px; height:9px; border-radius:2px; flex:none; }}
   .legend {{ display:flex; flex-wrap:wrap; gap:16px; margin-top:10px;
@@ -678,7 +743,7 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
 
   <header>
     <div>
-      <h1>{config.SYMBOL} &middot; {config.SHORT_WINDOW}/{config.LONG_WINDOW} moving average crossover</h1>
+      <h1>{watched} &middot; {config.SHORT_WINDOW}/{config.LONG_WINDOW} moving average crossover</h1>
       <div class="sub">
         Built {datetime.now(bot.MARKET_TZ):%d %b %Y, %H:%M %Z}
         {' &middot; ' + market if market else ''}
@@ -690,33 +755,9 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
 
   {banner}
 
-  <div class="tiles">{''.join(tiles)}</div>
-  {live_html}
+  <div class="tiles">{account_tiles}</div>
 
-  <h2>Price and the two averages &middot; last {len(points)} trading days</h2>
-  <div class="card chart-wrap">
-    {svg}
-    <div id="tip"></div>
-    <div class="legend">
-      <span><i class="sw" style="background:var(--series-close)"></i>Close</span>
-      <span><i class="sw" style="background:var(--series-short)"></i>{config.SHORT_WINDOW}-day average</span>
-      <span><i class="sw" style="background:var(--series-long)"></i>{config.LONG_WINDOW}-day average</span>
-      <span><i class="sw" style="background:var(--good);border-radius:50%"></i>Buy signal</span>
-      <span><i class="sw" style="background:var(--warn);border-radius:50%"></i>Sell signal</span>
-    </div>
-    <details>
-      <summary>Show the last 30 days as a table</summary>
-      <table style="margin-top:10px">
-        <thead><tr><th>Date</th><th class="num">Close</th>
-        <th class="num">{config.SHORT_WINDOW}-day</th>
-        <th class="num">{config.LONG_WINDOW}-day</th></tr></thead>
-        <tbody>{recent}</tbody>
-      </table>
-    </details>
-  </div>
-
-  <h2>Crossovers in this window</h2>
-  <div class="card">{cross_html}</div>
+  {''.join(sections)}
 
   {private_sections}
 
@@ -724,73 +765,78 @@ def render(data, signal, detail, crossovers, account, runs, next_run,
 </div>
 
 <script>
-const PTS = {json.dumps(points)};
+// One entry per charted symbol, keyed by the wrapper's data-uid.
+const SERIES = {json.dumps(series_js)};
 const SHORT = {json.dumps(f"{config.SHORT_WINDOW}-day")};
 const LONG  = {json.dumps(f"{config.LONG_WINDOW}-day")};
 
-const svg = document.querySelector('.chart');
-const hit = document.getElementById('hit');
-const tip = document.getElementById('tip');
-const hair = document.getElementById('crosshair');
-const dots = {{
-  c: document.getElementById('dot-close'),
-  s: document.getElementById('dot-short'),
-  l: document.getElementById('dot-long'),
-}};
 const row = (name, colour, value) =>
   value === null || value === undefined ? '' :
   `<div class="r"><span class="n"><i class="sw" style="background:${{colour}}"></i>${{name}}</span>` +
   `<strong>$${{value.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}})}}</strong></div>`;
 
-function toUser(evt) {{
-  // Map the pointer into the SVG's own coordinate space, whatever the
-  // rendered width happens to be.
-  const box = svg.getBoundingClientRect();
-  const vb = svg.viewBox.baseVal;
-  return (evt.clientX - box.left) / box.width * vb.width;
-}}
+// Each chart wires up its own handlers against its own elements, so any
+// number of them can sit on the page without colliding.
+function wire(wrap) {{
+  const pts = SERIES[wrap.dataset.uid];
+  if (!pts) return;
 
-function show(evt) {{
-  const ux = toUser(evt);
-  let best = 0, dist = Infinity;
-  for (let i = 0; i < PTS.length; i++) {{
-    const d = Math.abs(PTS[i].x - ux);
-    if (d < dist) {{ dist = d; best = i; }}
-  }}
-  const p = PTS[best];
-
-  hair.setAttribute('x1', p.x); hair.setAttribute('x2', p.x);
-  hair.style.opacity = 1;
-
-  const place = (dot, y) => {{
-    if (y === null) {{ dot.style.opacity = 0; return; }}
-    dot.setAttribute('cx', p.x); dot.setAttribute('cy', y);
-    dot.style.opacity = 1;
+  const svg  = wrap.querySelector('.chart');
+  const hit  = wrap.querySelector('.hit');
+  const tip  = wrap.querySelector('.tip');
+  const hair = wrap.querySelector('.crosshair');
+  const dots = {{
+    c: wrap.querySelector('.dot-close'),
+    s: wrap.querySelector('.dot-short'),
+    l: wrap.querySelector('.dot-long'),
   }};
-  place(dots.c, p.cy); place(dots.s, p.sy); place(dots.l, p.ly);
 
-  tip.innerHTML = `<div class="d">${{p.d}}</div>` +
-    row('Close', 'var(--series-close)', p.c) +
-    row(SHORT, 'var(--series-short)', p.s) +
-    row(LONG, 'var(--series-long)', p.l);
+  function show(evt) {{
+    const box = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const ux = (evt.clientX - box.left) / box.width * vb.width;
 
-  const box = svg.getBoundingClientRect();
-  const vb = svg.viewBox.baseVal;
-  const px = p.x / vb.width * box.width;
-  tip.style.opacity = 1;
-  tip.style.left = Math.min(Math.max(px + 14, 0),
-                            box.width - tip.offsetWidth - 4) + 'px';
-  tip.style.top = '14px';
+    let best = 0, dist = Infinity;
+    for (let i = 0; i < pts.length; i++) {{
+      const d = Math.abs(pts[i].x - ux);
+      if (d < dist) {{ dist = d; best = i; }}
+    }}
+    const p = pts[best];
+
+    hair.setAttribute('x1', p.x); hair.setAttribute('x2', p.x);
+    hair.style.opacity = 1;
+
+    const place = (dot, y) => {{
+      if (y === null) {{ dot.style.opacity = 0; return; }}
+      dot.setAttribute('cx', p.x); dot.setAttribute('cy', y);
+      dot.style.opacity = 1;
+    }};
+    place(dots.c, p.cy); place(dots.s, p.sy); place(dots.l, p.ly);
+
+    tip.innerHTML = `<div class="d">${{p.d}}</div>` +
+      row('Close', 'var(--series-close)', p.c) +
+      row(SHORT, 'var(--series-short)', p.s) +
+      row(LONG, 'var(--series-long)', p.l);
+
+    const px = p.x / vb.width * box.width;
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(Math.max(px + 14, 0),
+                              box.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = '14px';
+  }}
+
+  function hide() {{
+    tip.style.opacity = 0; hair.style.opacity = 0;
+    Object.values(dots).forEach(d => d.style.opacity = 0);
+  }}
+
+  hit.addEventListener('mousemove', show);
+  hit.addEventListener('mouseleave', hide);
+  hit.addEventListener('touchmove', e => {{ show(e.touches[0]); }},
+                       {{passive:true}});
 }}
 
-function hide() {{
-  tip.style.opacity = 0; hair.style.opacity = 0;
-  Object.values(dots).forEach(d => d.style.opacity = 0);
-}}
-
-hit.addEventListener('mousemove', show);
-hit.addEventListener('mouseleave', hide);
-hit.addEventListener('touchmove', e => {{ show(e.touches[0]); }}, {{passive:true}});
+document.querySelectorAll('.chart-wrap').forEach(wire);
 
 document.getElementById('theme').addEventListener('click', () => {{
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
@@ -817,16 +863,25 @@ def build(public: bool = False, out=None) -> None:
     """
     bot.validate_config()
 
-    data = bot.add_moving_averages(bot.fetch_history(config.SYMBOL, CHART_DAYS))
-    signal, detail = bot.detect_crossover(data)
+    blocks = []
+    for symbol in bot.symbols():
+        data = bot.add_moving_averages(bot.fetch_history(symbol, CHART_DAYS))
+        signal, detail = bot.detect_crossover(data)
+        blocks.append({
+            "symbol": symbol,
+            "data": data,
+            "signal": signal,
+            "detail": detail,
+            "crossovers": find_crossovers(data),
+            "quote": None if public else gather_quote(symbol),
+        })
 
     page = render(
-        data, signal, detail,
-        find_crossovers(data),
-        {"ok": False, "error": None} if public else gather_account(),
+        blocks,
+        {"ok": False, "error": None, "positions": {}, "orders": []}
+        if public else gather_account(),
         [] if public else gather_runs(),
         None if public else gather_schedule(),
-        quote=None if public else gather_quote(config.SYMBOL),
         public=public,
     )
 

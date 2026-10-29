@@ -101,8 +101,22 @@ def timing_note(now: datetime | None = None,
             f"unaffected, but any fill is at the price now, not at the open.")
 
 
+def symbols() -> list[str]:
+    """The symbols to trade, tidied and de-duplicated."""
+    seen, out = set(), []
+    for raw in config.SYMBOLS:
+        s = raw.strip().upper()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 def validate_config() -> None:
     """Stop early on settings that can never produce a sane signal."""
+    if not symbols():
+        raise SystemExit("config error: SYMBOLS is empty. Add at least one "
+                         "ticker, for example SYMBOLS = [\"AAPL\"].")
     if config.SHORT_WINDOW >= config.LONG_WINDOW:
         raise SystemExit(
             f"config error: SHORT_WINDOW ({config.SHORT_WINDOW}) must be smaller "
@@ -304,8 +318,13 @@ def held_shares(client: TradingClient, symbol: str) -> float:
         return 0.0
 
 
-def can_act_on(client: TradingClient, signal: str, price: float) -> tuple[bool, str]:
-    """Check the account can actually carry out this signal."""
+def can_act_on(client: TradingClient, symbol: str, signal: str,
+               price: float) -> tuple[bool, str]:
+    """Check the account can actually carry out this signal.
+
+    Buying power is read fresh each time, because an order placed for an
+    earlier symbol in the same run has already reserved its cash.
+    """
     account = client.get_account()
 
     if account.trading_blocked:
@@ -321,20 +340,20 @@ def can_act_on(client: TradingClient, signal: str, price: float) -> tuple[bool, 
             )
         return True, ""
 
-    position = held_shares(client, config.SYMBOL)
+    position = held_shares(client, symbol)
     if config.BLOCK_SHORT_SELLS and position < config.TRADE_QTY:
         return False, (
-            f"you hold {position:g} share(s) of {config.SYMBOL} and selling "
+            f"you hold {position:g} share(s) of {symbol} and selling "
             f"{config.TRADE_QTY} would open a short position, which this "
             "account cannot do."
         )
     return True, ""
 
 
-def place_order(client: TradingClient, signal: str):
+def place_order(client: TradingClient, symbol: str, signal: str):
     """Send a market order for the configured quantity."""
     request = MarketOrderRequest(
-        symbol=config.SYMBOL,
+        symbol=symbol,
         qty=config.TRADE_QTY,
         side=OrderSide.BUY if signal == BUY else OrderSide.SELL,
         time_in_force=TimeInForce.DAY,
@@ -346,8 +365,8 @@ def place_order(client: TradingClient, signal: str):
 # Reporting
 # ---------------------------------------------------------------------------
 
-def print_reading(details: dict, signal: str | None) -> None:
-    print(f"Symbol            {config.SYMBOL}")
+def print_reading(symbol: str, details: dict, signal: str | None) -> None:
+    print(f"Symbol            {symbol}")
     print(f"Latest bar        {details['current_date']}")
     print(f"Close             ${details['close']:,.2f}")
     print(f"{config.SHORT_WINDOW}-day average     ${details['sma_short']:,.2f}")
@@ -370,9 +389,8 @@ def print_reading(details: dict, signal: str | None) -> None:
               f"line stayed {side} the slow one.")
 
 
-def print_status(client: TradingClient, details: dict) -> None:
+def print_status(client: TradingClient) -> None:
     account = client.get_account()
-    position = held_shares(client, config.SYMBOL)
     mode = "paper" if config.PAPER_TRADING else "LIVE MONEY"
 
     print()
@@ -380,7 +398,8 @@ def print_status(client: TradingClient, details: dict) -> None:
     print(f"Cash              ${float(account.cash):,.2f}")
     print(f"Portfolio value   ${float(account.portfolio_value):,.2f}")
     print(f"Buying power      ${float(account.buying_power):,.2f}")
-    print(f"{config.SYMBOL} position      {position:g} share(s)")
+    for symbol in symbols():
+        print(f"{symbol:<17} {held_shares(client, symbol):g} share(s)")
 
     clock = client.get_clock()
     if clock.is_open:
@@ -455,59 +474,92 @@ def main() -> int:
 def decide_and_trade(args) -> int:
     validate_config()
 
-    print(f"Fetching {config.LOOKBACK_DAYS} trading days of {config.SYMBOL} data...")
-    data = add_moving_averages(fetch_history(config.SYMBOL, config.LOOKBACK_DAYS))
+    if args.status:
+        print_status(connect())
+        return 0
+
+    worst = 0
+    client = None
+    watched = symbols()
+
+    for i, symbol in enumerate(watched):
+        if len(watched) > 1:
+            print()
+            print("-" * 56)
+            print(f"{symbol}  ({i + 1} of {len(watched)})")
+            print()
+        try:
+            code, client = handle_symbol(symbol, args, client)
+        except APIError as exc:
+            if "unauthorized" in str(exc).lower():
+                raise          # no symbol will work; let the top level say so
+            print(f"Alpaca refused the {symbol} order: {exc}")
+            code = 1
+        except Exception as exc:
+            # One bad symbol must not cost the others their turn.
+            print(f"Could not handle {symbol}: {type(exc).__name__}: {exc}")
+            code = 1
+        worst = max(worst, code)
+
+    return worst
+
+
+def handle_symbol(symbol: str, args, client):
+    """Judge one symbol and act on it. Returns (exit code, client).
+
+    The client is threaded through so a run with several symbols opens one
+    connection rather than one each, and is only opened at all if something
+    actually needs the account.
+    """
+    print(f"Fetching {config.LOOKBACK_DAYS} trading days of {symbol} data...")
+    data = add_moving_averages(fetch_history(symbol, config.LOOKBACK_DAYS))
     signal, details = detect_crossover(data)
 
     print()
-    print_reading(details, signal)
-
-    if args.status:
-        print_status(connect(), details)
-        return 0
+    print_reading(symbol, details, signal)
 
     if signal is None:
-        print("\nNothing to do.")
-        return 0
+        print("Nothing to do.")
+        return 0, client
 
     if config.PREVENT_DUPLICATE_TRADES and already_traded(
-        config.SYMBOL, signal, details["current_date"]
+        symbol, signal, details["current_date"]
     ):
-        print(f"\nAlready traded this crossover ({details['current_date']}). "
+        print(f"Already traded this crossover ({details['current_date']}). "
               f"Nothing to do.")
-        return 0
+        return 0, client
 
     if config.ONE_TRADE_PER_DAY:
-        traded_bar = already_traded_today(config.SYMBOL)
+        traded_bar = already_traded_today(symbol)
         if traded_bar:
-            print(f"\nAlready placed an order today, on the {traded_bar} "
-                  f"session. This run reads the {details['current_date']} "
-                  f"session, so acting would mean two orders in one day. "
-                  f"Leaving it for tomorrow.")
-            return 0
+            print(f"Already placed a {symbol} order today, on the "
+                  f"{traded_bar} session. This run reads the "
+                  f"{details['current_date']} session, so acting would mean "
+                  f"two orders in one day. Leaving it for tomorrow.")
+            return 0, client
 
     if args.dry_run:
-        print(f"\nDry run: would place a {signal} order for "
-              f"{config.TRADE_QTY} share(s) of {config.SYMBOL}.")
-        return 0
+        print(f"Dry run: would place a {signal} order for "
+              f"{config.TRADE_QTY} share(s) of {symbol}.")
+        return 0, client
 
-    client = connect()
-    allowed, reason = can_act_on(client, signal, details["close"])
+    client = client or connect()
+    allowed, reason = can_act_on(client, symbol, signal, details["close"])
     if not allowed:
-        print(f"\nSkipping the {signal} order: {reason}")
-        return 1
+        print(f"Skipping the {symbol} {signal} order: {reason}")
+        return 1, client
 
-    order = place_order(client, signal)
-    print(f"\nPlaced a {signal} market order for {config.TRADE_QTY} "
-          f"share(s) of {config.SYMBOL}.")
+    order = place_order(client, symbol, signal)
+    print(f"Placed a {signal} market order for {config.TRADE_QTY} "
+          f"share(s) of {symbol}.")
     print(f"Order id          {order.id}")
     print(f"Status            {order.status.value}")
 
     if not client.get_clock().is_open:
         print("The market is closed, so it will fill at the next open.")
 
-    write_state(config.SYMBOL, signal, details["current_date"], str(order.id))
-    return 0
+    write_state(symbol, signal, details["current_date"], str(order.id))
+    return 0, client
 
 
 if __name__ == "__main__":

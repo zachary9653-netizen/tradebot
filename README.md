@@ -143,14 +143,29 @@ Everything you are likely to change lives in `config.py`:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `SYMBOL` | `AAPL` | Ticker to watch and trade |
-| `TRADE_QTY` | `1` | Shares per order |
+| `SYMBOLS` | `["AAPL", "MSFT", "NVDA"]` | Tickers to watch, each judged on its own |
+| `TRADE_QTY` | `1` | Shares per order, per symbol |
 | `SHORT_WINDOW` | `20` | Fast average, in trading days |
 | `LONG_WINDOW` | `50` | Slow average, in trading days |
 | `LOOKBACK_DAYS` | `100` | Trading days of history to pull |
 | `PAPER_TRADING` | `True` | `False` sends orders to the live account |
 | `PREVENT_DUPLICATE_TRADES` | `True` | One order per crossover |
 | `BLOCK_SHORT_SELLS` | `True` | Never sell shares you do not hold |
+
+## Several symbols at once
+
+Every symbol in `SYMBOLS` is judged entirely on its own: its own averages,
+its own crossover, its own order, and its own line in `state.json`, so a
+trade in one never suppresses a trade in another. The guards are per symbol
+too - one order per crossover per symbol, one order per day per symbol.
+
+A symbol that fails, through a bad ticker or a Yahoo hiccup, is reported and
+skipped. The rest of the list still gets its turn.
+
+Buying power is re-read before every order, because an order placed earlier
+in the same run has already reserved its cash. With $1,500 and 1 share per
+signal, a few names at once is the practical limit; past that, buys start
+being skipped for want of cash, which the log says plainly.
 
 ## What counts as a signal
 

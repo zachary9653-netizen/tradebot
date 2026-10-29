@@ -23,16 +23,27 @@ import config
 TRADING_DAYS_PER_YEAR = 252
 
 
-def replay(years: int) -> None:
-    """Walk through history one day at a time, as the bot would see it."""
-    days = years * TRADING_DAYS_PER_YEAR
-
-    print(f"Replaying {years} year(s) of real {config.SYMBOL} data through the "
-          f"bot's own logic.")
+def replay_all(years: int) -> None:
+    """Replay every watched symbol, each on its own."""
+    watched = bot.symbols()
+    print(f"Replaying {years} year(s) of real data through the bot's own "
+          f"logic, one symbol at a time.")
     print(f"Strategy: {config.SHORT_WINDOW}/{config.LONG_WINDOW} day crossover, "
-          f"{config.TRADE_QTY} share(s) per signal.\n")
+          f"{config.TRADE_QTY} share(s) per signal.")
+    print(f"Watching: {', '.join(watched)}\n")
 
-    data = bot.add_moving_averages(bot.fetch_history(config.SYMBOL, days))
+    for symbol in watched:
+        print("=" * 64)
+        print(symbol)
+        print("=" * 64)
+        replay(symbol, years)
+        print()
+
+
+def replay(symbol: str, years: int) -> None:
+    """Walk through one symbol's history, as the bot would have seen it."""
+    days = years * TRADING_DAYS_PER_YEAR
+    data = bot.add_moving_averages(bot.fetch_history(symbol, days))
 
     # Start the wallet where the real account started.
     cash = 1500.00
@@ -120,7 +131,7 @@ def show_order_shape() -> None:
     print("=" * 64)
 
     request = MarketOrderRequest(
-        symbol=config.SYMBOL,
+        symbol=bot.symbols()[0],
         qty=config.TRADE_QTY,
         side=OrderSide.BUY,
         time_in_force=TimeInForce.DAY,
@@ -141,7 +152,7 @@ def main() -> int:
     print("SIMULATED RUN - no orders are placed")
     print("=" * 64 + "\n")
 
-    replay(args.years)
+    replay_all(args.years)
     show_order_shape()
     return 0
 
