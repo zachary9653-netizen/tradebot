@@ -1,39 +1,28 @@
 name: Trading bot
 
-# Runs on GitHub's machines, so your own PC can be off.
+# GitHub's scheduler has no timing guarantee, and on this repository it has
+# started runs five to six hours late every single day. Asking it to start
+# at 09:07 ET simply does not produce a 09:07 run.
+#
+# So we stop trying. The schedule asks for a run every half hour through the
+# small hours and morning, and each run decides for itself what to do:
+# too early, it stops; close enough, it sleeps until 09:07 ET and then
+# trades exactly on time; already past, it runs anyway rather than not at
+# all; already done today, it stops. schedule_window.py holds that logic and
+# test_schedule.py replays the real delays against it.
+#
+# Only one run a day does any work. The rest exit in seconds, and Actions
+# minutes are free on a public repository, so the waiting costs nothing.
 on:
   schedule:
-    # GitHub's scheduler offers no timing guarantee. It queues runs and is
-    # delayed most at busy times - the top of the hour and round minutes
-    # like :00, :15 and :30. A run scheduled for :30 was once delayed about
-    # six hours here.
-    #
-    # So: fire several times, at odd minutes, and let the first one that
-    # actually starts do the work. The rest cost about a minute of compute
-    # each and do nothing, because the bot refuses a second order on the
-    # same crossover and caps itself at one order a day either way.
-    #
-    # UTC does not follow daylight saving, so each time is listed twice.
-    # 13:xx is 09:xx ET in summer, 14:xx is 09:xx ET in winter. The set that
-    # is an hour out lands mid-morning and harmlessly finds the work done.
-    #
-    # Being early is safe: the signal comes from a session that has already
-    # closed, and a market order placed before the open waits for it.
-    - cron: "7 13 * * 1-5"    # 09:07 ET summer
-    - cron: "23 13 * * 1-5"   # 09:23
-    - cron: "41 13 * * 1-5"   # 09:41
-    - cron: "7 14 * * 1-5"    # 09:07 ET winter
-    - cron: "23 14 * * 1-5"   # 09:23
-    - cron: "41 14 * * 1-5"   # 09:41
-  # Adds a "Run workflow" button on the Actions tab, so you can trigger it
-  # by hand from your phone.
+    - cron: "*/30 5-14 * * 1-5"
   workflow_dispatch:
 
 permissions:
-  # Needed to commit the log and state back to the repository.
   contents: write
 
-# Never let two runs trade at once.
+# A sleeping job holds the group. GitHub keeps only one run pending per
+# group, so later ones cannot pile up behind it.
 concurrency:
   group: trading-bot
   cancel-in-progress: false
@@ -41,38 +30,59 @@ concurrency:
 jobs:
   trade:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Long enough for the longest wait plus the run itself.
+    timeout-minutes: 150
 
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
 
+      # Deliberately before setting up Python or installing anything: a run
+      # that is going to stop should cost seconds, not a minute of setup.
+      # The runner's own python3 is enough, since this imports only stdlib.
+      - name: Decide what this run should do
+        id: window
+        run: python3 schedule_window.py >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the opening
+        if: steps.window.outputs.action == 'wait'
+        run: |
+          echo "Sleeping ${{ steps.window.outputs.seconds }}s to trade at 09:07 ET."
+          sleep ${{ steps.window.outputs.seconds }}
+
       - name: Set up Python
+        if: steps.window.outputs.action != 'skip'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
+        if: steps.window.outputs.action != 'skip'
         run: pip install -r requirements.txt
 
       - name: Run the bot
+        if: steps.window.outputs.action != 'skip'
         env:
-          # These come from Settings -> Secrets and variables -> Actions.
-          # They are encrypted, and masked if anything tries to print them.
+          # From Settings -> Secrets and variables -> Actions. Encrypted,
+          # and masked if anything tries to print them.
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: python bot.py --log --dashboard
 
       - name: Show what happened
-        # Puts the run's output straight on the workflow summary page, so you
-        # can read the result on your phone without downloading anything.
+        if: steps.window.outputs.action != 'skip'
         run: |
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -n 25 logs/bot.log >> "$GITHUB_STEP_SUMMARY"
+          tail -n 40 logs/bot.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Say why it stopped
+        if: steps.window.outputs.action == 'skip'
+        run: echo "Stopped early - ${{ steps.window.outputs.why }}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish the dashboard
+        if: steps.window.outputs.action != 'skip'
         uses: actions/upload-artifact@v4
         with:
           name: dashboard
@@ -80,6 +90,7 @@ jobs:
           retention-days: 30
 
       - name: Commit the log and state
+        if: steps.window.outputs.action != 'skip'
         run: |
           git config user.name "tradebot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

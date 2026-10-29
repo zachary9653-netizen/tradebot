@@ -96,9 +96,41 @@ Disable-ScheduledTask -TaskName "Tradebot MA Crossover"
 
 ## When it runs
 
-Weekdays, three attempts each morning: **9:07, 9:23 and 9:41 Eastern**.
+Weekdays at **9:07 AM Eastern**, and this time that is the real answer
+rather than an aspiration.
 
-### Why three, and why it still is not a promise
+### How, given GitHub is hours late
+
+GitHub's scheduler has no timing guarantee and on this repository it has
+started runs **five to six hours late every day**. Asking it for 9:07 does
+not produce a 9:07 run, and asking three times does not either - all three
+inherit the same delay.
+
+So the workflow stops trying to be started on time. It asks for a run every
+half hour from 1:00 to 10:30 AM ET, and each run decides for itself:
+
+| When it actually starts | What it does |
+| --- | --- |
+| More than 100 min early | Stops in seconds. A later run will be better placed. |
+| Within 100 min of 9:07 | **Sleeps until 9:07, then trades exactly on time.** |
+| After 9:07 | Runs anyway - late beats never. |
+| After the 4pm close | Stops. Tomorrow reads the same session. |
+| A run already finished today | Stops. |
+
+One run a day does the work; the other nineteen exit in seconds. Actions
+minutes are free on a public repository, so a job sitting and waiting costs
+nothing.
+
+`test_schedule.py` replays the delays this repository actually saw against
+that logic. At every delay from zero to eight hours, one run waits and
+trades at 9:07 on the nose. Only past about nine hours does it fall back to
+running late.
+
+```bash
+python test_schedule.py
+```
+
+### The older approach, and why it failed
 
 **GitHub's scheduler offers no timing guarantee, on any plan.** It queues
 scheduled runs and starts them when it has capacity. On 26 October 2026 it

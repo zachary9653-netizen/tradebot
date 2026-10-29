@@ -3,10 +3,20 @@ name: Publish dashboard
 # Deliberately separate from the trading workflow. Publishing is cosmetic and
 # trading is not, so a problem here must never turn the morning's trading run
 # red or stop it placing an order.
+#
+# Triggered by the commit the bot makes when it has actually done something,
+# rather than by every trading run. The schedule now fires twenty times a
+# day and nearly all of those stop in seconds; republishing after each would
+# be twenty pointless deploys.
 on:
-  workflow_run:
-    workflows: ["Trading bot"]
-    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - "logs/**"
+      - "state.json"
+      - "bot.py"
+      - "config.py"
+      - "dashboard.py"
   workflow_dispatch:
 
 permissions:

@@ -290,6 +290,18 @@ def already_traded(symbol: str, signal: str, bar_date: str) -> bool:
     return bool(last and last["bar_date"] == bar_date and last["signal"] == signal)
 
 
+def record_run() -> None:
+    """Note that a run finished today, so later runs can stand down.
+
+    Kept under a key no ticker can collide with. schedule_window.py reads
+    this before the workflow installs anything, which is why it lives in
+    state.json rather than somewhere that needs a library to read.
+    """
+    state = read_state()
+    state["_meta"] = {"last_run": datetime.now(MARKET_TZ).date().isoformat()}
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
 def already_traded_today(symbol: str) -> str | None:
     """The bar we traded on earlier today, or None.
 
@@ -462,7 +474,12 @@ def main() -> int:
         print(f"Started {timing_note()}")
 
     try:
-        return decide_and_trade(args)
+        code = decide_and_trade(args)
+        if not args.dry_run and not args.status:
+            # Only a run that got all the way through stands the later ones
+            # down. One that raised should not stop the day being retried.
+            record_run()
+        return code
     finally:
         # The dashboard is rebuilt whatever the run did, including when it
         # placed an order and when it failed, so the page never shows a
