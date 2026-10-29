@@ -33,6 +33,16 @@ import bot
 import config
 
 OUTPUT = bot.BASE_DIR / "dashboard.html"
+
+# Shown under the ticker in the overview, the way the Stocks app does.
+# Anything not listed just shows the ticker, which is no loss.
+NAMES = {
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA",
+    "JPM": "JPMorgan Chase", "XOM": "Exxon Mobil", "GOOGL": "Alphabet",
+    "AMZN": "Amazon", "META": "Meta", "TSLA": "Tesla", "KO": "Coca-Cola",
+    "JNJ": "Johnson & Johnson", "WMT": "Walmart", "DIS": "Disney",
+    "NFLX": "Netflix", "V": "Visa", "PG": "Procter & Gamble",
+}
 CHART_DAYS = 260          # about a year of trading days
 LOG_RUNS = 8              # how many recent runs to list
 TASK_NAME = "Tradebot MA Crossover"
@@ -331,6 +341,49 @@ def tile(label: str, value: str, note: str = "", tone: str = "") -> str:
     )
 
 
+# The sparkline and the change beside it must cover the same stretch of
+# time, or a row can show a rising line next to a falling number. The Stocks
+# app keeps them in step because both follow its selected range; this has no
+# range picker, so one window serves both.
+SPARK_DAYS = 40
+
+
+def window_change(data, days: int = SPARK_DAYS) -> tuple[float, float]:
+    """Move across the sparkline's own window, in dollars and percent."""
+    closes = [float(c) for c in data["Close"].tolist()[-days:]]
+    if len(closes) < 2:
+        return 0.0, 0.0
+    last, first = closes[-1], closes[0]
+    return last - first, ((last - first) / first * 100) if first else 0.0
+
+
+def sparkline(data, days: int = SPARK_DAYS, w: int = 112, h: int = 34) -> str:
+    """A small line of the recent closes, as the Stocks app shows per row."""
+    closes = [float(c) for c in data["Close"].tolist()[-days:]]
+    if len(closes) < 2:
+        return ""
+    lo, hi = min(closes), max(closes)
+    span = (hi - lo) or 1.0
+    step = w / (len(closes) - 1)
+    pts = " ".join(
+        f"{i * step:.1f},{h - 2 - (c - lo) / span * (h - 4):.1f}"
+        for i, c in enumerate(closes)
+    )
+    rising = closes[-1] >= closes[0]
+    cls = "spark-up" if rising else "spark-down"
+    return (f'<svg class="spark {cls}" viewBox="0 0 {w} {h}" '
+            f'preserveAspectRatio="none" aria-hidden="true">'
+            f'<polyline points="{pts}"/></svg>')
+
+
+def change_pill(change: float, pct: float) -> str:
+    """The rounded badge. The sign and number carry the meaning; the colour
+    only reinforces it, so it still reads without colour vision."""
+    tone = "up" if change >= 0 else "down"
+    sign = "+" if change >= 0 else "-"
+    return (f'<span class="pill {tone}">{sign}{abs(pct):.2f}%</span>')
+
+
 def signal_wording(signal, detail) -> tuple[str, str, str]:
     """The headline value, tone and explanation for one symbol's signal."""
     if signal == bot.BUY:
@@ -463,9 +516,19 @@ def symbol_section(block, account, public, uid) -> tuple[str, list]:
 
     live = "" if public else live_panel(symbol, account, block.get("quote"))
 
+    change, pct = window_change(block["data"])
     html_out = f"""
-  <section class="symbol">
-    <h2 class="symbol-name">{symbol}</h2>
+  <section class="symbol" id="{symbol}">
+    <div class="symbol-head">
+      <div>
+        <h2 class="symbol-name">{symbol}</h2>
+        <div class="symbol-sub">{NAMES.get(symbol, 'Watched by the bot')}</div>
+      </div>
+      <div class="symbol-price">
+        <div class="symbol-last">{money(detail['close'])}</div>
+        {change_pill(change, pct)}
+      </div>
+    </div>
     <div class="tiles">{''.join(tiles)}</div>
     {live}
     <div class="card chart-wrap" data-uid="{uid}">
@@ -502,12 +565,36 @@ def render(blocks, account, runs, next_run, public: bool = False) -> str:
     both of which anyone could work out from public prices. It carries no
     balance, no position, no orders, no account number and no run log.
     """
-    sections, series = [], {}
+    sections, series, rows = [], {}, []
     for uid, block in enumerate(blocks):
         section_html, points = symbol_section(block, account, public, uid)
         sections.append(section_html)
         series[str(uid)] = points
+
+        # The overview row, in the shape the Stocks app uses: name on the
+        # left, a sparkline in the middle, price and change on the right.
+        detail = block["detail"]
+        change, pct = window_change(block["data"])
+        value, tone, _ = signal_wording(block["signal"], detail)
+        flag = (f'<span class="row-flag {tone}">{value}</span>'
+                if tone else "")
+        rows.append(
+            f'<a class="row" href="#{block["symbol"]}">'
+            f'  <span class="row-id">'
+            f'    <span class="row-ticker">{block["symbol"]}</span>'
+            f'    <span class="row-sub">{NAMES.get(block["symbol"], "")}{flag}</span>'
+            f'  </span>'
+            f'  {sparkline(block["data"])}'
+            f'  <span class="row-right">'
+            f'    <span class="row-price">{money(detail["close"])}</span>'
+            f'    {change_pill(change, pct)}'
+            f'  </span>'
+            f'</a>'
+        )
     series_js = series
+    overview = (f'<div class="rows-head">Watchlist '
+                f'<span>last {SPARK_DAYS} sessions</span></div>'
+                f'<div class="rows">{"".join(rows)}</div>')
 
     # Account tiles sit once at the top, above the per-symbol sections.
     account_tiles = ""
@@ -599,35 +686,92 @@ def render(blocks, account, runs, next_run, public: bool = False) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{watched} crossover bot</title>
 <style>
+  /* iOS system colours, so this reads like the Stocks app. Dark is the
+     home ground; light is its own set of steps, not an inversion. */
   :root {{
     color-scheme: light;
-    --surface-0:#f4f4f1; --surface-1:#fcfcfb; --border:#e2e1dc;
-    --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#78776f;
-    --series-close:#b9b8b1; --series-short:#2a78d6; --series-long:#eb6834;
-    --good:#1baf7a; --warn:#e34948;
+    --surface-0:#f2f2f7; --surface-1:#ffffff; --border:#e3e3e8;
+    --text-primary:#000000; --text-secondary:#3c3c43; --text-muted:#8e8e93;
+    --series-close:#aeaeb2; --series-short:#007aff; --series-long:#ff9500;
+    --good:#34c759; --warn:#ff3b30;
   }}
   @media (prefers-color-scheme: dark) {{
     :root:not([data-theme="light"]) {{
       color-scheme: dark;
-      --surface-0:#121211; --surface-1:#1a1a19; --border:#33322f;
-      --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#8e8d84;
-      --series-close:#55544e; --series-short:#3987e5; --series-long:#d95926;
-      --good:#199e70; --warn:#e66767;
+      --surface-0:#000000; --surface-1:#1c1c1e; --border:#2c2c2e;
+      --text-primary:#ffffff; --text-secondary:#ebebf5; --text-muted:#8e8e93;
+      --series-close:#636366; --series-short:#0a84ff; --series-long:#ff9f0a;
+      --good:#30d158; --warn:#ff453a;
     }}
   }}
   :root[data-theme="dark"] {{
     color-scheme: dark;
-    --surface-0:#121211; --surface-1:#1a1a19; --border:#33322f;
-    --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#8e8d84;
-    --series-close:#55544e; --series-short:#3987e5; --series-long:#d95926;
-    --good:#199e70; --warn:#e66767;
+    --surface-0:#000000; --surface-1:#1c1c1e; --border:#2c2c2e;
+    --text-primary:#ffffff; --text-secondary:#ebebf5; --text-muted:#8e8e93;
+    --series-close:#636366; --series-short:#0a84ff; --series-long:#ff9f0a;
+    --good:#30d158; --warn:#ff453a;
   }}
   * {{ box-sizing: border-box; }}
   body {{
-    margin:0; padding:32px 16px 64px; background:var(--surface-0);
+    margin:0; padding:28px 16px 64px; background:var(--surface-0);
     color:var(--text-primary);
-    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",
+         ui-sans-serif,system-ui,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
   }}
+
+  /* The overview list: one tappable row per symbol, as the Stocks app
+     lays it out - identity left, sparkline middle, price and move right. */
+  .rows-head {{ display:flex; justify-content:space-between;
+                align-items:baseline; margin:22px 2px 8px;
+                font-size:13px; font-weight:650;
+                text-transform:uppercase; letter-spacing:0.06em;
+                color:var(--text-muted); }}
+  .rows-head span {{ text-transform:none; letter-spacing:0;
+                     font-weight:400; }}
+  .rows {{ background:var(--surface-1); border-radius:14px;
+           overflow:hidden; }}
+  .row {{ display:grid; grid-template-columns:1fr auto auto; gap:14px;
+          align-items:center; padding:12px 16px; text-decoration:none;
+          color:inherit; border-top:1px solid var(--border); }}
+  .row:first-child {{ border-top:none; }}
+  .row:hover {{ background:var(--surface-0); }}
+  .row-id {{ display:flex; flex-direction:column; gap:2px; min-width:0; }}
+  .row-ticker {{ font-size:19px; font-weight:650; letter-spacing:-0.02em; }}
+  .row-sub {{ font-size:13px; color:var(--text-muted);
+              display:flex; align-items:center; gap:7px;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .row-flag {{ font-size:11px; font-weight:650; padding:1px 6px;
+               border-radius:5px; letter-spacing:0.01em; }}
+  .row-flag.good {{ background:var(--good); color:#fff; }}
+  .row-flag.warn {{ background:var(--warn); color:#fff; }}
+  .spark {{ width:112px; height:34px; }}
+  .spark polyline {{ fill:none; stroke-width:1.8;
+                     stroke-linejoin:round; stroke-linecap:round;
+                     vector-effect:non-scaling-stroke; }}
+  .spark-up polyline {{ stroke:var(--good); }}
+  .spark-down polyline {{ stroke:var(--warn); }}
+  .row-right {{ display:flex; flex-direction:column; align-items:flex-end;
+                gap:4px; }}
+  .row-price {{ font-size:17px; font-weight:600;
+                font-variant-numeric:tabular-nums; }}
+  /* The sign and the number carry the meaning. Colour only reinforces it,
+     so the row still reads without colour vision. */
+  .pill {{ display:inline-block; min-width:74px; text-align:center;
+           padding:3px 9px; border-radius:7px; color:#fff;
+           font-size:13.5px; font-weight:600;
+           font-variant-numeric:tabular-nums; }}
+  .pill.up {{ background:var(--good); }}
+  .pill.down {{ background:var(--warn); }}
+
+  .symbol-head {{ display:flex; align-items:flex-start;
+                  justify-content:space-between; gap:16px;
+                  margin:18px 0 14px; }}
+  .symbol-sub {{ font-size:13.5px; color:var(--text-muted); margin-top:2px; }}
+  .symbol-price {{ display:flex; flex-direction:column;
+                   align-items:flex-end; gap:5px; }}
+  .symbol-last {{ font-size:25px; font-weight:650; letter-spacing:-0.02em;
+                  font-variant-numeric:tabular-nums; }}
   .wrap {{ max-width:1000px; margin:0 auto; }}
   header {{ display:flex; flex-wrap:wrap; gap:12px; align-items:baseline;
             justify-content:space-between; margin-bottom:4px; }}
@@ -637,11 +781,11 @@ def render(blocks, account, runs, next_run, public: bool = False) -> str:
         color:var(--text-secondary); font-weight:600; }}
   /* Each symbol is its own band, so a page of several reads as a list
      rather than one long undifferentiated scroll. */
-  .symbol {{ margin-top:38px; padding-top:4px;
-             border-top:1px solid var(--border); }}
-  .symbol:first-of-type {{ border-top:none; }}
-  .symbol-name {{ font-size:20px; margin:16px 0 12px;
-                  letter-spacing:-0.02em; }}
+  .symbol {{ margin-top:40px; padding-top:8px;
+             border-top:1px solid var(--border);
+             scroll-margin-top:16px; }}
+  .symbol-name {{ font-size:24px; margin:0; letter-spacing:-0.025em;
+                  font-weight:680; }}
   .symbol .tiles {{ margin-top:0; }}
   .sub {{ color:var(--text-secondary); font-size:13px; }}
   .mono {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:12px; }}
@@ -754,6 +898,8 @@ def render(blocks, account, runs, next_run, public: bool = False) -> str:
   </header>
 
   {banner}
+
+  {overview}
 
   <div class="tiles">{account_tiles}</div>
 
