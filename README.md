@@ -143,7 +143,7 @@ Everything you are likely to change lives in `config.py`:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `SYMBOLS` | `["AAPL", "MSFT", "NVDA"]` | Tickers to watch, each judged on its own |
+| `SYMBOLS` | `["AAPL", "JPM", "XOM"]` | Tickers to watch, each judged on its own |
 | `TRADE_QTY` | `1` | Shares per order, per symbol |
 | `SHORT_WINDOW` | `20` | Fast average, in trading days |
 | `LONG_WINDOW` | `50` | Slow average, in trading days |

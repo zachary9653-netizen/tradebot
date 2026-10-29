@@ -13,13 +13,14 @@ Your API keys do NOT go here - they live in the .env file.
 # averages, its own crossover, its own order, its own memory of what it has
 # already traded.
 #
-# These are placeholders to show the list working, not suggestions about what
-# to own. Put whatever you actually want to follow here.
-#
 # Each symbol costs one Yahoo request per run, so a long list makes runs
 # slower. Every buy also needs its own cash: at 1 share each, a $1,500
 # account can hold a handful of names at these prices and no more.
-SYMBOLS = ["AAPL", "MSFT", "NVDA"]
+SYMBOLS = [
+    "AAPL",   # Apple
+    "JPM",    # JPMorgan Chase
+    "XOM",    # Exxon Mobil
+]
 
 # How many shares to buy or sell per signal, per symbol.
 TRADE_QTY = 1
