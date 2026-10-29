@@ -484,3 +484,58 @@ Gap               $+6.24 on 2026-10-27 -> $+6.87 today
 Signal            none - the averages did not cross. The fast line stayed above the slow one.
 Nothing to do.
 Rebuilt dashboard.html
+
+===== 2026-10-29 09:36:53 EDT =====
+Started 6 min after the open.
+
+--------------------------------------------------------
+AAPL  (1 of 3)
+
+Fetching 100 trading days of AAPL data...
+Ignoring today's unfinished bar (2026-10-29); deciding on the last completed session.
+
+Symbol            AAPL
+Latest bar        2026-10-28
+Close             $343.83
+20-day average     $340.61
+50-day average     $331.73
+Gap               $+9.01 on 2026-10-27 -> $+8.87 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+JPM  (2 of 3)
+
+Fetching 100 trading days of JPM data...
+Ignoring today's unfinished bar (2026-10-29); deciding on the last completed session.
+
+Symbol            JPM
+Latest bar        2026-10-28
+Close             $339.30
+20-day average     $333.79
+50-day average     $342.71
+Gap               $-9.87 on 2026-10-27 -> $-8.92 today
+
+Signal            none - the averages did not cross. The fast line stayed below the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+XOM  (3 of 3)
+
+Fetching 100 trading days of XOM data...
+Ignoring today's unfinished bar (2026-10-29); deciding on the last completed session.
+
+Symbol            XOM
+Latest bar        2026-10-28
+Close             $182.02
+20-day average     $173.84
+50-day average     $166.97
+Gap               $+6.24 on 2026-10-27 -> $+6.87 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+Ignoring today's unfinished bar (2026-10-29); deciding on the last completed session.
+Ignoring today's unfinished bar (2026-10-29); deciding on the last completed session.
+Ignoring today's unfinished bar (2026-10-29); deciding on the last completed session.
+Rebuilt dashboard.html
