@@ -937,3 +937,52 @@ Gap               $+8.53 on 2026-11-06 -> $+8.00 today
 Signal            none - the averages did not cross. The fast line stayed above the slow one.
 Nothing to do.
 Rebuilt dashboard.html
+
+===== 2026-11-11 09:07:15 EST =====
+Started 23 min before the open. Any order will queue for it.
+
+--------------------------------------------------------
+AAPL  (1 of 3)
+
+Fetching 100 trading days of AAPL data...
+
+Symbol            AAPL
+Latest bar        2026-11-10
+Close             $348.51
+20-day average     $344.23
+50-day average     $337.27
+Gap               $+7.24 on 2026-11-09 -> $+6.97 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+JPM  (2 of 3)
+
+Fetching 100 trading days of JPM data...
+
+Symbol            JPM
+Latest bar        2026-11-10
+Close             $342.07
+20-day average     $337.95
+50-day average     $340.41
+Gap               $-3.24 on 2026-11-09 -> $-2.46 today
+
+Signal            none - the averages did not cross. The fast line stayed below the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+XOM  (3 of 3)
+
+Fetching 100 trading days of XOM data...
+
+Symbol            XOM
+Latest bar        2026-11-10
+Close             $164.47
+20-day average     $176.51
+50-day average     $169.06
+Gap               $+8.00 on 2026-11-09 -> $+7.45 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+Rebuilt dashboard.html
