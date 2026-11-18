@@ -6,6 +6,12 @@
     "traded_on": "2026-10-26"
   },
   "_meta": {
-    "last_run": "2026-11-17"
+    "last_run": "2026-11-18"
+  },
+  "JPM": {
+    "signal": "BUY",
+    "bar_date": "2026-11-17",
+    "order_id": "1d4d2a14-4576-4f7a-9b1e-c3a0943f6709",
+    "traded_on": "2026-11-18"
   }
 }
