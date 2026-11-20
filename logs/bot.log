@@ -1283,3 +1283,55 @@ Gap               $+4.60 on 2026-11-17 -> $+3.83 today
 Signal            none - the averages did not cross. The fast line stayed above the slow one.
 Nothing to do.
 Rebuilt dashboard.html
+
+===== 2026-11-20 09:07:11 EST =====
+Started 23 min before the open. Any order will queue for it.
+
+--------------------------------------------------------
+AAPL  (1 of 3)
+
+Fetching 100 trading days of AAPL data...
+
+Symbol            AAPL
+Latest bar        2026-11-19
+Close             $349.21
+20-day average     $347.55
+50-day average     $341.37
+Gap               $+6.57 on 2026-11-18 -> $+6.18 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+JPM  (2 of 3)
+
+Fetching 100 trading days of JPM data...
+
+Symbol            JPM
+Latest bar        2026-11-19
+Close             $320.22
+20-day average     $337.64
+50-day average     $337.69
+Gap               $+0.14 on 2026-11-18 -> $-0.04 today
+
+Signal            SELL - the 20-day average crossed below the 50-day.
+Placed a SELL market order for 1 share(s) of JPM.
+Order id          4631b38c-e264-4188-badc-7ce264631869
+Status            pending_new
+The market is closed, so it will fill at the next open.
+
+--------------------------------------------------------
+XOM  (3 of 3)
+
+Fetching 100 trading days of XOM data...
+
+Symbol            XOM
+Latest bar        2026-11-19
+Close             $158.93
+20-day average     $171.51
+50-day average     $168.48
+Gap               $+3.83 on 2026-11-18 -> $+3.03 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+Rebuilt dashboard.html
