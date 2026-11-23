@@ -1335,3 +1335,58 @@ Gap               $+3.83 on 2026-11-18 -> $+3.03 today
 Signal            none - the averages did not cross. The fast line stayed above the slow one.
 Nothing to do.
 Rebuilt dashboard.html
+
+===== 2026-11-23 10:50:36 EST =====
+Started 1h 20m after the open - the scheduler was late. The signal is unaffected, but any fill is at the price now, not at the open.
+
+--------------------------------------------------------
+AAPL  (1 of 3)
+
+Fetching 100 trading days of AAPL data...
+Ignoring today's unfinished bar (2026-11-23); deciding on the last completed session.
+
+Symbol            AAPL
+Latest bar        2026-11-20
+Close             $342.56
+20-day average     $347.31
+50-day average     $341.59
+Gap               $+6.18 on 2026-11-19 -> $+5.72 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+JPM  (2 of 3)
+
+Fetching 100 trading days of JPM data...
+Ignoring today's unfinished bar (2026-11-23); deciding on the last completed session.
+
+Symbol            JPM
+Latest bar        2026-11-20
+Close             $310.53
+20-day average     $336.59
+50-day average     $336.81
+Gap               $-0.04 on 2026-11-19 -> $-0.22 today
+
+Signal            none - the averages did not cross. The fast line stayed below the slow one.
+Nothing to do.
+
+--------------------------------------------------------
+XOM  (3 of 3)
+
+Fetching 100 trading days of XOM data...
+Ignoring today's unfinished bar (2026-11-23); deciding on the last completed session.
+
+Symbol            XOM
+Latest bar        2026-11-20
+Close             $159.99
+20-day average     $170.40
+50-day average     $168.38
+Gap               $+3.03 on 2026-11-19 -> $+2.02 today
+
+Signal            none - the averages did not cross. The fast line stayed above the slow one.
+Nothing to do.
+Ignoring today's unfinished bar (2026-11-23); deciding on the last completed session.
+Ignoring today's unfinished bar (2026-11-23); deciding on the last completed session.
+Ignoring today's unfinished bar (2026-11-23); deciding on the last completed session.
+Rebuilt dashboard.html
